@@ -1,0 +1,37 @@
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
+
+function subscribe(channel, callback) {
+  const listener = (_event, payload) => callback(payload);
+  ipcRenderer.on(channel, listener);
+  return () => ipcRenderer.removeListener(channel, listener);
+}
+
+function getDroppedFilePaths(files) {
+  return files
+    .map((file) => {
+      try {
+        return webUtils.getPathForFile(file);
+      } catch {
+        return "";
+      }
+    })
+    .filter(Boolean);
+}
+
+contextBridge.exposeInMainWorld("lplay", {
+  pickVideoFiles: () => ipcRenderer.invoke("media:pick-files"),
+  prepareMediaFiles: (filePaths) => ipcRenderer.invoke("media:prepare-files", filePaths),
+  makeMediaCompatible: (filePath) => ipcRenderer.invoke("media:make-compatible", filePath),
+  getDroppedFilePaths: (files) => getDroppedFilePaths(files),
+  startDroppedFileImport: (fileName) => ipcRenderer.invoke("media:drop-import-start", fileName),
+  appendDroppedFileChunk: (importId, chunk) => ipcRenderer.invoke("media:drop-import-append", { importId, chunk }),
+  finishDroppedFileImport: (importId) => ipcRenderer.invoke("media:drop-import-finish", importId),
+  abortDroppedFileImport: (importId) => ipcRenderer.invoke("media:drop-import-abort", importId),
+  pickM3u8Playlist: () => ipcRenderer.invoke("m3u8:pick-playlist"),
+  chooseM3u8Output: (defaultName) => ipcRenderer.invoke("m3u8:choose-output", defaultName),
+  downloadM3u8: (options) => ipcRenderer.invoke("m3u8:download", options),
+  cancelM3u8: (jobId) => ipcRenderer.invoke("m3u8:cancel", jobId),
+  revealPath: (filePath) => ipcRenderer.invoke("shell:show-path", filePath),
+  onConversionProgress: (callback) => subscribe("media:conversion-progress", callback),
+  onM3u8Progress: (callback) => subscribe("m3u8:progress", callback)
+});

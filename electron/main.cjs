@@ -1,0 +1,868 @@
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron");
+const { spawn } = require("node:child_process");
+const crypto = require("node:crypto");
+const fs = require("node:fs");
+const http = require("node:http");
+const path = require("node:path");
+const { fileURLToPath } = require("node:url");
+
+const DIRECT_PLAYABLE_EXTENSIONS = new Set([".mp4", ".m4v", ".mov", ".webm", ".ogv", ".ogg"]);
+const DIRECT_MP4_EXTENSIONS = new Set([".mp4", ".m4v", ".mov"]);
+const DIRECT_WEBM_EXTENSIONS = new Set([".webm", ".ogv", ".ogg"]);
+const CHROMIUM_MP4_VIDEO_CODECS = new Set(["h264"]);
+const CHROMIUM_MP4_AUDIO_CODECS = new Set(["aac", "mp3"]);
+const CHROMIUM_WEBM_VIDEO_CODECS = new Set(["vp8", "vp9", "av1"]);
+const CHROMIUM_WEBM_AUDIO_CODECS = new Set(["opus", "vorbis"]);
+const KNOWN_VIDEO_EXTENSIONS = new Set([
+  ".mp4",
+  ".m4v",
+  ".mov",
+  ".webm",
+  ".ogv",
+  ".ogg",
+  ".avi",
+  ".mkv",
+  ".wmv",
+  ".flv",
+  ".mpg",
+  ".mpeg",
+  ".ts",
+  ".mts",
+  ".m2ts",
+  ".3gp",
+  ".vob",
+  ".m3u8"
+]);
+
+const runningM3u8Jobs = new Map();
+const dropImports = new Map();
+const mediaFiles = new Map();
+let mediaServerPort = 0;
+let mediaServer;
+
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
+function resolveBinaryPath(name) {
+  const executableName = process.platform === "win32" ? `${name}.exe` : name;
+  const candidates = [
+    path.join(process.resourcesPath || "", "bin", executableName),
+    path.join(__dirname, "..", "build-resources", "bin", executableName),
+    executableName
+  ];
+
+  return candidates.find((candidate) => candidate === executableName || fileExists(candidate)) || executableName;
+}
+
+function mediaContentType(filePath) {
+  switch (path.extname(filePath).toLowerCase()) {
+    case ".mp4":
+    case ".m4v":
+    case ".mov":
+      return "video/mp4";
+    case ".webm":
+      return "video/webm";
+    case ".ogv":
+    case ".ogg":
+      return "video/ogg";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+function streamMediaFile(request, response, filePath) {
+  fs.stat(filePath, (statError, stat) => {
+    if (statError || !stat.isFile()) {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+
+    const contentType = mediaContentType(filePath);
+    const range = request.headers.range;
+    const commonHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Accept-Ranges": "bytes",
+      "Cache-Control": "no-store",
+      "Content-Type": contentType
+    };
+
+    if (!range) {
+      response.writeHead(200, {
+        ...commonHeaders,
+        "Content-Length": stat.size
+      });
+
+      if (request.method === "HEAD") {
+        response.end();
+        return;
+      }
+
+      fs.createReadStream(filePath).pipe(response);
+      return;
+    }
+
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (!match) {
+      response.writeHead(416, {
+        ...commonHeaders,
+        "Content-Range": `bytes */${stat.size}`
+      });
+      response.end();
+      return;
+    }
+
+    const start = match[1] ? Number(match[1]) : 0;
+    const end = match[2] ? Math.min(Number(match[2]), stat.size - 1) : stat.size - 1;
+
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start > end || start >= stat.size) {
+      response.writeHead(416, {
+        ...commonHeaders,
+        "Content-Range": `bytes */${stat.size}`
+      });
+      response.end();
+      return;
+    }
+
+    response.writeHead(206, {
+      ...commonHeaders,
+      "Content-Length": end - start + 1,
+      "Content-Range": `bytes ${start}-${end}/${stat.size}`
+    });
+
+    if (request.method === "HEAD") {
+      response.end();
+      return;
+    }
+
+    fs.createReadStream(filePath, { start, end }).pipe(response);
+  });
+}
+
+function startMediaServer() {
+  return new Promise((resolve, reject) => {
+    mediaServer = http.createServer((request, response) => {
+      response.setHeader("Access-Control-Allow-Origin", "*");
+      response.setHeader("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS");
+      response.setHeader("Access-Control-Allow-Headers", "Range");
+
+      if (request.method === "OPTIONS") {
+        response.writeHead(204);
+        response.end();
+        return;
+      }
+
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        response.writeHead(405);
+        response.end();
+        return;
+      }
+
+      let requestUrl;
+      try {
+        requestUrl = new URL(request.url || "/", "http://127.0.0.1");
+      } catch {
+        response.writeHead(400);
+        response.end();
+        return;
+      }
+
+      const segments = requestUrl.pathname.split("/").filter(Boolean);
+      if (segments[0] !== "media" || !segments[1]) {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+
+      const filePath = mediaFiles.get(segments[1]);
+      if (!filePath) {
+        response.writeHead(404);
+        response.end();
+        return;
+      }
+
+      streamMediaFile(request, response, filePath);
+    });
+
+    mediaServer.once("error", reject);
+    mediaServer.listen(0, "127.0.0.1", () => {
+      mediaServerPort = mediaServer.address().port;
+      resolve();
+    });
+  });
+}
+
+function playbackUrlFor(filePath) {
+  const token = crypto.randomUUID();
+  mediaFiles.set(token, filePath);
+  return `http://127.0.0.1:${mediaServerPort}/media/${token}/${encodeURIComponent(path.basename(filePath))}`;
+}
+
+function createWindow() {
+  const window = new BrowserWindow({
+    width: 1440,
+    height: 940,
+    minWidth: 1024,
+    minHeight: 720,
+    backgroundColor: "#11100f",
+    title: "Lplay",
+    autoHideMenuBar: true,
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: "#161411",
+      symbolColor: "#e9ded0",
+      height: 48
+    },
+    webPreferences: {
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  });
+
+  if (process.env.VITE_DEV_SERVER_URL) {
+    window.loadURL(process.env.VITE_DEV_SERVER_URL);
+    window.webContents.openDevTools({ mode: "detach" });
+  } else {
+    window.loadFile(path.join(__dirname, "../dist/index.html"));
+  }
+}
+
+app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null);
+  await startMediaServer();
+  createWindow();
+
+  app.on("activate", () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on("window-all-closed", () => {
+  if (mediaServer) {
+    mediaServer.close();
+  }
+  if (process.platform !== "darwin") {
+    app.quit();
+  }
+});
+
+function sendToRenderer(sender, channel, payload) {
+  if (!sender.isDestroyed()) {
+    sender.send(channel, payload);
+  }
+}
+
+function safeBaseName(filePath) {
+  return path
+    .basename(filePath, path.extname(filePath))
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, "_")
+    .slice(0, 72);
+}
+
+function fileExists(filePath) {
+  try {
+    return fs.existsSync(filePath);
+  } catch {
+    return false;
+  }
+}
+
+function safeImportedFileName(fileName) {
+  const extension = path.extname(fileName).toLowerCase().replace(/[^a-z0-9.]/g, "");
+  const baseName = safeBaseName(fileName) || "dropped-video";
+  return `${baseName}${extension}`;
+}
+
+function normalizePossibleFileUrl(value) {
+  const text = String(value || "").trim();
+  if (text.startsWith("file://")) {
+    try {
+      return fileURLToPath(text);
+    } catch {
+      return text;
+    }
+  }
+  return text;
+}
+
+function probeMedia(filePathOrUrl) {
+  return new Promise((resolve) => {
+    const args = [
+      "-v",
+      "error",
+      "-show_entries",
+      "format=duration:stream=index,codec_type,codec_name,profile,width,height,pix_fmt",
+      "-of",
+      "json",
+      filePathOrUrl
+    ];
+
+    const child = spawn(resolveBinaryPath("ffprobe"), args, { windowsHide: true });
+    let stdout = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.on("error", () => resolve({}));
+    child.on("close", () => {
+      try {
+        const parsed = JSON.parse(stdout);
+        const streams = Array.isArray(parsed.streams) ? parsed.streams : [];
+        const video = streams.find((stream) => stream.codec_type === "video") || {};
+        const audio = streams.find((stream) => stream.codec_type === "audio") || {};
+        resolve({
+          duration: Number.parseFloat(parsed.format?.duration || "0") || 0,
+          width: Number(video.width) || 0,
+          height: Number(video.height) || 0,
+          codec: video.codec_name || "",
+          profile: video.profile || "",
+          pixFmt: video.pix_fmt || "",
+          audioCodec: audio.codec_name || "",
+          audioProfile: audio.profile || "",
+          hasAudio: Boolean(audio.codec_name)
+        });
+      } catch {
+        resolve({});
+      }
+    });
+  });
+}
+
+function canPlayDirectly(extension, metadata) {
+  const videoCodec = String(metadata.codec || "").toLowerCase();
+  const audioCodec = String(metadata.audioCodec || "").toLowerCase();
+  const pixFmt = String(metadata.pixFmt || "").toLowerCase();
+
+  if (!videoCodec) {
+    return false;
+  }
+
+  if (DIRECT_MP4_EXTENSIONS.has(extension)) {
+    const videoOk =
+      CHROMIUM_MP4_VIDEO_CODECS.has(videoCodec) &&
+      (!pixFmt || ["yuv420p", "nv12"].includes(pixFmt));
+    const audioOk = !metadata.hasAudio || CHROMIUM_MP4_AUDIO_CODECS.has(audioCodec);
+    return videoOk && audioOk;
+  }
+
+  if (DIRECT_WEBM_EXTENSIONS.has(extension)) {
+    const videoOk = CHROMIUM_WEBM_VIDEO_CODECS.has(videoCodec);
+    const audioOk = !metadata.hasAudio || CHROMIUM_WEBM_AUDIO_CODECS.has(audioCodec);
+    return videoOk && audioOk;
+  }
+
+  return false;
+}
+
+function parseProgressLineMap(text) {
+  const result = {};
+  for (const line of text.split(/\r?\n/)) {
+    const index = line.indexOf("=");
+    if (index > 0) {
+      result[line.slice(0, index)] = line.slice(index + 1);
+    }
+  }
+  return result;
+}
+
+function runFfmpeg({ args, sender, progressChannel, basePayload, durationSeconds, onStarted }) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(resolveBinaryPath("ffmpeg"), args, { windowsHide: true });
+    let stderr = "";
+    let stdoutBuffer = "";
+
+    onStarted?.(child);
+
+    child.stdout.on("data", (chunk) => {
+      stdoutBuffer += chunk.toString();
+      const parts = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = parts.pop() || "";
+      const map = parseProgressLineMap(parts.join("\n"));
+      if (Object.keys(map).length > 0) {
+        const outTimeMs = Number(map.out_time_ms || 0);
+        const outSeconds = outTimeMs > 0 ? outTimeMs / 1000000 : undefined;
+        const percent =
+          durationSeconds && outSeconds ? Math.min(99, Math.max(0, (outSeconds / durationSeconds) * 100)) : undefined;
+        sendToRenderer(sender, progressChannel, {
+          ...basePayload,
+          percent,
+          outSeconds,
+          speed: map.speed,
+          rawProgress: map.progress
+        });
+      }
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", (error) => {
+      reject(error);
+    });
+
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      const tail = stderr.split(/\r?\n/).filter(Boolean).slice(-8).join("\n");
+      reject(new Error(tail || `FFmpeg exited with code ${code}`));
+    });
+  });
+}
+
+async function convertToMp4(sender, filePath, jobId) {
+  const stat = await fs.promises.stat(filePath);
+  const hash = crypto
+    .createHash("sha1")
+    .update(`${filePath}:${stat.mtimeMs}:${stat.size}`)
+    .digest("hex")
+    .slice(0, 16);
+  const outputDir = path.join(app.getPath("userData"), "converted");
+  await fs.promises.mkdir(outputDir, { recursive: true });
+
+  const outputPath = path.join(outputDir, `${safeBaseName(filePath)}-${hash}.mp4`);
+  if (fileExists(outputPath)) {
+    const outputStat = await fs.promises.stat(outputPath).catch(() => undefined);
+    if (outputStat?.size > 0) {
+      sendToRenderer(sender, "media:conversion-progress", {
+        jobId,
+        filePath,
+        fileName: path.basename(filePath),
+        stage: "cached",
+        percent: 100,
+        message: "使用已缓存的 MP4"
+      });
+      return { outputPath, cached: true };
+    }
+
+    await fs.promises.rm(outputPath, { force: true }).catch(() => undefined);
+  }
+
+  sendToRenderer(sender, "media:conversion-progress", {
+    jobId,
+    filePath,
+    fileName: path.basename(filePath),
+    stage: "probing",
+    percent: 0,
+    message: "读取媒体信息"
+  });
+
+  const metadata = await probeMedia(filePath);
+  const durationSeconds = Number(metadata.duration) || 0;
+
+  sendToRenderer(sender, "media:conversion-progress", {
+    jobId,
+    filePath,
+    fileName: path.basename(filePath),
+    stage: "converting",
+    percent: 0,
+    message: "转码为 MP4"
+  });
+
+  const args = [
+    "-hide_banner",
+    "-y",
+    "-progress",
+    "pipe:1",
+    "-nostats",
+    "-i",
+    filePath,
+    "-map",
+    "0:v:0",
+    "-map",
+    "0:a?",
+    "-vf",
+    "scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "22",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "160k",
+    "-movflags",
+    "+faststart",
+    outputPath
+  ];
+
+  try {
+    await runFfmpeg({
+      args,
+      sender,
+      progressChannel: "media:conversion-progress",
+      basePayload: {
+        jobId,
+        filePath,
+        fileName: path.basename(filePath),
+        stage: "converting",
+        message: "转码为 MP4"
+      },
+      durationSeconds
+    });
+  } catch (error) {
+    if (fileExists(outputPath)) {
+      await fs.promises.rm(outputPath, { force: true });
+    }
+    sendToRenderer(sender, "media:conversion-progress", {
+      jobId,
+      filePath,
+      fileName: path.basename(filePath),
+      stage: "error",
+      message: error.message
+    });
+    throw error;
+  }
+
+  sendToRenderer(sender, "media:conversion-progress", {
+    jobId,
+    filePath,
+    fileName: path.basename(filePath),
+    stage: "ready",
+    percent: 100,
+    message: "转码完成"
+  });
+
+  return { outputPath, cached: false };
+}
+
+async function prepareOneMedia(sender, filePath) {
+  const normalizedPath = normalizePossibleFileUrl(filePath);
+  const stat = await fs.promises.stat(normalizedPath);
+  if (!stat.isFile()) {
+    throw new Error(`${normalizedPath} 不是文件`);
+  }
+
+  const extension = path.extname(normalizedPath).toLowerCase();
+  if (!KNOWN_VIDEO_EXTENSIONS.has(extension)) {
+    throw new Error(`${path.basename(normalizedPath)} 不是支持的视频文件`);
+  }
+
+  const metadata = DIRECT_PLAYABLE_EXTENSIONS.has(extension) ? await probeMedia(normalizedPath) : {};
+
+  if (DIRECT_PLAYABLE_EXTENSIONS.has(extension) && canPlayDirectly(extension, metadata)) {
+    return {
+      id: crypto.randomUUID(),
+      sourcePath: normalizedPath,
+      preparedPath: normalizedPath,
+      playbackUrl: playbackUrlFor(normalizedPath),
+      displayName: path.basename(normalizedPath),
+      originalExtension: extension.replace(".", ""),
+      converted: false,
+      cached: false,
+      metadata
+    };
+  }
+
+  const jobId = crypto.randomUUID();
+  sendToRenderer(sender, "media:conversion-progress", {
+    jobId,
+    filePath: normalizedPath,
+    fileName: path.basename(normalizedPath),
+    stage: "queued",
+    percent: 0,
+    message: DIRECT_PLAYABLE_EXTENSIONS.has(extension) ? "转为兼容 MP4" : "等待转码"
+  });
+
+  const conversion = await convertToMp4(sender, normalizedPath, jobId);
+  const convertedMetadata = await probeMedia(conversion.outputPath);
+
+  return {
+    id: crypto.randomUUID(),
+    sourcePath: normalizedPath,
+    preparedPath: conversion.outputPath,
+    playbackUrl: playbackUrlFor(conversion.outputPath),
+    displayName: path.basename(normalizedPath),
+    originalExtension: extension.replace(".", ""),
+    converted: true,
+    cached: conversion.cached,
+    metadata: convertedMetadata
+  };
+}
+
+async function forceCompatibleMedia(sender, filePath) {
+  const normalizedPath = normalizePossibleFileUrl(filePath);
+  const stat = await fs.promises.stat(normalizedPath);
+  if (!stat.isFile()) {
+    throw new Error(`${normalizedPath} 不是文件`);
+  }
+
+  const extension = path.extname(normalizedPath).toLowerCase();
+  if (!KNOWN_VIDEO_EXTENSIONS.has(extension)) {
+    throw new Error(`${path.basename(normalizedPath)} 不是支持的视频文件`);
+  }
+
+  const jobId = crypto.randomUUID();
+  sendToRenderer(sender, "media:conversion-progress", {
+    jobId,
+    filePath: normalizedPath,
+    fileName: path.basename(normalizedPath),
+    stage: "queued",
+    percent: 0,
+    message: "自动修复播放兼容性"
+  });
+
+  const conversion = await convertToMp4(sender, normalizedPath, jobId);
+  const convertedMetadata = await probeMedia(conversion.outputPath);
+
+  return {
+    id: crypto.randomUUID(),
+    sourcePath: normalizedPath,
+    preparedPath: conversion.outputPath,
+    playbackUrl: playbackUrlFor(conversion.outputPath),
+    displayName: path.basename(normalizedPath),
+    originalExtension: extension.replace(".", ""),
+    converted: true,
+    cached: conversion.cached,
+    metadata: convertedMetadata
+  };
+}
+
+ipcMain.handle("media:pick-files", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "选择视频文件",
+    properties: ["openFile", "multiSelections"],
+    filters: [
+      {
+        name: "Video files",
+        extensions: Array.from(KNOWN_VIDEO_EXTENSIONS).map((extension) => extension.slice(1))
+      },
+      { name: "All files", extensions: ["*"] }
+    ]
+  });
+
+  return result.canceled ? [] : result.filePaths;
+});
+
+ipcMain.handle("media:prepare-files", async (event, filePaths) => {
+  if (!Array.isArray(filePaths)) {
+    throw new Error("filePaths must be an array");
+  }
+
+  const results = [];
+  const errors = [];
+
+  for (const filePath of filePaths) {
+    try {
+      results.push(await prepareOneMedia(event.sender, filePath));
+    } catch (error) {
+      errors.push({
+        filePath: String(filePath || ""),
+        message: error.message
+      });
+    }
+  }
+
+  return { results, errors };
+});
+
+ipcMain.handle("media:make-compatible", async (event, filePath) => {
+  return forceCompatibleMedia(event.sender, filePath);
+});
+
+ipcMain.handle("media:drop-import-start", async (_event, fileName) => {
+  const importId = crypto.randomUUID();
+  const importDir = path.join(app.getPath("temp"), "lplay-dropped");
+  await fs.promises.mkdir(importDir, { recursive: true });
+
+  const outputPath = path.join(importDir, `${Date.now()}-${importId.slice(0, 8)}-${safeImportedFileName(fileName)}`);
+  const stream = fs.createWriteStream(outputPath, { flags: "wx" });
+  dropImports.set(importId, { outputPath, stream });
+
+  return { importId };
+});
+
+ipcMain.handle("media:drop-import-append", async (_event, payload) => {
+  const entry = dropImports.get(payload?.importId);
+  if (!entry) {
+    throw new Error("拖拽导入任务不存在");
+  }
+
+  const buffer = Buffer.from(payload.chunk);
+  await new Promise((resolve, reject) => {
+    entry.stream.write(buffer, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+
+  return true;
+});
+
+ipcMain.handle("media:drop-import-finish", async (_event, importId) => {
+  const entry = dropImports.get(importId);
+  if (!entry) {
+    throw new Error("拖拽导入任务不存在");
+  }
+
+  await new Promise((resolve, reject) => {
+    const onError = (error) => {
+      entry.stream.off("finish", onFinish);
+      reject(error);
+    };
+    const onFinish = () => {
+      entry.stream.off("error", onError);
+      resolve();
+    };
+
+    entry.stream.once("error", onError);
+    entry.stream.once("finish", onFinish);
+    entry.stream.end();
+  });
+
+  dropImports.delete(importId);
+  return entry.outputPath;
+});
+
+ipcMain.handle("media:drop-import-abort", async (_event, importId) => {
+  const entry = dropImports.get(importId);
+  if (!entry) {
+    return false;
+  }
+
+  dropImports.delete(importId);
+  entry.stream.destroy();
+  await fs.promises.rm(entry.outputPath, { force: true }).catch(() => undefined);
+  return true;
+});
+
+ipcMain.handle("m3u8:pick-playlist", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "选择 M3U8 文件",
+    properties: ["openFile"],
+    filters: [
+      { name: "M3U8 playlist", extensions: ["m3u8"] },
+      { name: "All files", extensions: ["*"] }
+    ]
+  });
+
+  return result.canceled ? "" : result.filePaths[0];
+});
+
+ipcMain.handle("m3u8:choose-output", async (_event, defaultName) => {
+  const result = await dialog.showSaveDialog({
+    title: "保存为 MP4",
+    defaultPath: defaultName || `lplay-${Date.now()}.mp4`,
+    filters: [{ name: "MP4 video", extensions: ["mp4"] }]
+  });
+
+  return result.canceled ? "" : result.filePath;
+});
+
+ipcMain.handle("m3u8:download", async (event, options) => {
+  const jobId = options?.jobId || crypto.randomUUID();
+  const source = String(options?.source || "").trim();
+  let outputPath = String(options?.outputPath || "").trim();
+
+  if (!source) {
+    throw new Error("请填写 M3U8 地址或本地文件路径");
+  }
+
+  if (!outputPath) {
+    throw new Error("请选择输出 MP4 路径");
+  }
+
+  if (path.extname(outputPath).toLowerCase() !== ".mp4") {
+    outputPath += ".mp4";
+  }
+
+  const input = /^https?:\/\//i.test(source) ? source : normalizePossibleFileUrl(source);
+  await fs.promises.mkdir(path.dirname(outputPath), { recursive: true });
+
+  const metadata = /^https?:\/\//i.test(input) || fileExists(input) ? await probeMedia(input) : {};
+  const durationSeconds = Number(metadata.duration) || 0;
+
+  sendToRenderer(event.sender, "m3u8:progress", {
+    jobId,
+    status: "running",
+    percent: durationSeconds ? 0 : undefined,
+    message: "开始转存"
+  });
+
+  const args = [
+    "-hide_banner",
+    "-y",
+    "-progress",
+    "pipe:1",
+    "-nostats",
+    "-protocol_whitelist",
+    "file,http,https,tcp,tls,crypto",
+    "-allowed_extensions",
+    "ALL",
+    "-i",
+    input,
+    "-map",
+    "0",
+    "-c",
+    "copy",
+    "-bsf:a",
+    "aac_adtstoasc",
+    "-movflags",
+    "+faststart",
+    outputPath
+  ];
+
+  try {
+    await runFfmpeg({
+      args,
+      sender: event.sender,
+      progressChannel: "m3u8:progress",
+      basePayload: {
+        jobId,
+        status: "running",
+        message: "正在转存"
+      },
+      durationSeconds,
+      onStarted: (child) => runningM3u8Jobs.set(jobId, child)
+    });
+  } catch (error) {
+    runningM3u8Jobs.delete(jobId);
+    sendToRenderer(event.sender, "m3u8:progress", {
+      jobId,
+      status: "error",
+      message: error.message
+    });
+    throw error;
+  }
+
+  runningM3u8Jobs.delete(jobId);
+  sendToRenderer(event.sender, "m3u8:progress", {
+    jobId,
+    status: "done",
+    percent: 100,
+    message: "转存完成",
+    outputPath
+  });
+
+  return { outputPath };
+});
+
+ipcMain.handle("m3u8:cancel", async (_event, jobId) => {
+  const child = runningM3u8Jobs.get(jobId);
+  if (child) {
+    child.kill("SIGTERM");
+    runningM3u8Jobs.delete(jobId);
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle("shell:show-path", async (_event, filePath) => {
+  if (filePath && fileExists(filePath)) {
+    shell.showItemInFolder(filePath);
+    return true;
+  }
+  return false;
+});
