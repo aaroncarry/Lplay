@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
+  <title id="title">Lplay magnet download panel</title>
+  <desc id="desc">The right sidebar magnet download panel with default folder, progress, retry, and delete actions.</desc>
+  <rect width="1280" height="760" fill="#11100f"/>
+  <rect x="0" y="0" width="1280" height="58" fill="#161411"/>
+  <text x="76" y="36" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="22" font-weight="700">Lplay</text>
+  <text x="76" y="52" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="12">Magnet workflow</text>
+  <rect x="20" y="76" width="795" height="660" rx="8" fill="#151412" stroke="#39342d"/>
+  <g transform="translate(210 230)">
+    <path d="M64 0 h250 a64 64 0 0 1 0 128 h-250 a64 64 0 0 1 0 -128" fill="#1a1815" stroke="#39342d"/>
+    <circle cx="92" cy="64" r="30" fill="#48b7aa" opacity=".22"/>
+    <path d="M82 44 v40 M102 44 v40 M82 44 h20 M82 84 h20" stroke="#48b7aa" stroke-width="8" stroke-linecap="round"/>
+    <text x="146" y="58" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="20" font-weight="700">Download files</text>
+    <text x="146" y="86" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="14">Paste a magnet link in the sidebar</text>
+  </g>
+  <rect x="838" y="76" width="422" height="660" rx="8" fill="#151412" stroke="#39342d"/>
+  <g transform="translate(858 96)">
+    <rect x="0" y="0" width="382" height="620" rx="8" fill="#1a1815" stroke="#39342d"/>
+    <g transform="translate(18 18)">
+      <path d="M12 2 v28 M28 2 v28 M12 2 h16 M12 30 h16" stroke="#48b7aa" stroke-width="4" stroke-linecap="round"/>
+      <text x="46" y="24" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="20" font-weight="700">Magnet Download</text>
+    </g>
+    <text x="18" y="76" fill="#cfc5b5" font-family="Segoe UI, Arial" font-size="13">Magnet link</text>
+    <rect x="18" y="88" width="346" height="84" rx="7" fill="#11100f" stroke="#4a443c"/>
+    <text x="34" y="116" fill="#9f9486" font-family="Consolas, monospace" font-size="13">magnet:?xt=urn:btih:...</text>
+    <text x="18" y="200" fill="#cfc5b5" font-family="Segoe UI, Arial" font-size="13">Default download folder</text>
+    <rect x="18" y="212" width="292" height="38" rx="7" fill="#11100f" stroke="#4a443c"/>
+    <text x="32" y="236" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="13">D:\Downloads\Lplay</text>
+    <rect x="320" y="212" width="44" height="38" rx="7" fill="#24211d" stroke="#4a443c"/>
+    <path d="M332 230 h20 l4 14 h-28 z M332 224 h10 l4 6" fill="none" stroke="#f1c46d" stroke-width="2"/>
+    <rect x="18" y="276" width="96" height="38" rx="7" fill="#1d6f68" stroke="#2e8e84"/>
+    <text x="48" y="300" fill="#fff" font-family="Segoe UI, Arial" font-size="14" font-weight="700">Start</text>
+    <rect x="124" y="276" width="42" height="38" rx="7" fill="#24211d" stroke="#4a443c"/>
+    <path d="M137 286 l16 16 M153 286 l-16 16" stroke="#d5cbbb" stroke-width="2"/>
+    <rect x="176" y="276" width="42" height="38" rx="7" fill="#24211d" stroke="#4a443c"/>
+    <path d="M188 296 h20 l4 12 h-28 z M188 290 h10 l4 6" fill="none" stroke="#d5cbbb" stroke-width="2"/>
+    <rect x="18" y="342" width="346" height="174" rx="8" fill="#151412" stroke="#5a4b31"/>
+    <text x="34" y="372" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="15" font-weight="700">sample-video-pack</text>
+    <rect x="292" y="352" width="56" height="24" rx="12" fill="#25221d"/>
+    <text x="304" y="369" fill="#f1c46d" font-family="Segoe UI, Arial" font-size="11">72%</text>
+    <rect x="34" y="394" width="314" height="8" rx="4" fill="#0c0b0a"/>
+    <rect x="34" y="394" width="226" height="8" rx="4" fill="#48b7aa"/>
+    <text x="34" y="426" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="12">1.4 GB / 2.0 GB</text>
+    <text x="250" y="426" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="12">5.2 MB/s · 18 peers</text>
+    <rect x="34" y="446" width="88" height="32" rx="7" fill="#24211d" stroke="#4a443c"/>
+    <text x="60" y="467" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="12">Retry</text>
+    <rect x="132" y="446" width="32" height="32" rx="7" fill="#24211d" stroke="#4a443c"/>
+    <path d="M140 463 h16 l3 9 h-22 z M140 458 h8 l3 5" fill="none" stroke="#d5cbbb" stroke-width="1.8"/>
+    <rect x="174" y="446" width="32" height="32" rx="7" fill="#24211d" stroke="#4a443c"/>
+    <path d="M184 456 h12 M187 456 v15 M193 456 v15 M182 460 h16" stroke="#ffb0a6" stroke-width="1.8"/>
+    <rect x="18" y="536" width="346" height="58" rx="8" fill="#151412" stroke="#a8483b"/>
+    <text x="34" y="566" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="14" font-weight="700">cancelled-task</text>
+    <text x="258" y="566" fill="#ffb0a6" font-family="Segoe UI, Arial" font-size="12">Retry or delete</text>
+  </g>
+</svg>

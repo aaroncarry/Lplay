@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
+  <title id="title">Lplay highlights, ratings, and tags</title>
+  <desc id="desc">A video tile with star ratings, tags, highlight rail, and sidebar filter controls.</desc>
+  <rect width="1280" height="760" fill="#11100f"/>
+  <rect x="0" y="0" width="1280" height="58" fill="#161411"/>
+  <text x="78" y="36" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="22" font-weight="700">Lplay</text>
+  <rect x="20" y="76" width="805" height="660" rx="8" fill="#151412" stroke="#39342d"/>
+  <g transform="translate(46 108)">
+    <rect x="0" y="0" width="735" height="510" rx="8" fill="#1c1a17" stroke="#48b7aa"/>
+    <rect x="18" y="18" width="698" height="78" rx="7" fill="#171512"/>
+    <text x="34" y="46" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="17" font-weight="700">field-review.mp4</text>
+    <g transform="translate(34 58)">
+      <path d="M10 0 l3 7 h7 l-5 5 2 8 -7 -4 -7 4 2 -8 -5 -5 h7 z" fill="#f1c46d"/>
+      <path d="M38 0 l3 7 h7 l-5 5 2 8 -7 -4 -7 4 2 -8 -5 -5 h7 z" fill="#f1c46d"/>
+      <path d="M66 0 l3 7 h7 l-5 5 2 8 -7 -4 -7 4 2 -8 -5 -5 h7 z" fill="#f1c46d"/>
+      <path d="M94 0 l3 7 h7 l-5 5 2 8 -7 -4 -7 4 2 -8 -5 -5 h7 z" fill="#f1c46d"/>
+      <path d="M122 0 l3 7 h7 l-5 5 2 8 -7 -4 -7 4 2 -8 -5 -5 h7 z" fill="#736a60"/>
+    </g>
+    <rect x="206" y="52" width="78" height="28" rx="14" fill="#1d6f68" stroke="#2e8e84"/>
+    <text x="226" y="70" fill="#fff" font-family="Segoe UI, Arial" font-size="12">review</text>
+    <rect x="294" y="52" width="74" height="28" rx="14" fill="#24211d" stroke="#4a443c"/>
+    <text x="314" y="70" fill="#d5cbbb" font-family="Segoe UI, Arial" font-size="12">scene</text>
+    <rect x="18" y="112" width="698" height="315" fill="#050505"/>
+    <rect x="170" y="156" width="360" height="222" rx="10" fill="#263733"/>
+    <path d="M330 244 L330 302 L380 273 Z" fill="#f1c46d"/>
+    <text x="34" y="458" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="13">02:16 / 14:30</text>
+    <text x="626" y="458" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="13">3 highlights</text>
+    <rect x="34" y="476" width="666" height="12" rx="6" fill="#0e0d0c"/>
+    <rect x="152" y="478" width="92" height="8" rx="4" fill="#e66f5c"/>
+    <rect x="310" y="478" width="56" height="8" rx="4" fill="#e66f5c"/>
+    <rect x="514" y="478" width="118" height="8" rx="4" fill="#e66f5c"/>
+  </g>
+  <rect x="846" y="76" width="414" height="660" rx="8" fill="#151412" stroke="#39342d"/>
+  <g transform="translate(866 96)">
+    <rect x="0" y="0" width="374" height="156" rx="8" fill="#1a1815" stroke="#39342d"/>
+    <text x="18" y="32" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="18" font-weight="700">Filter and Sort</text>
+    <text x="18" y="66" fill="#cfc5b5" font-family="Segoe UI, Arial" font-size="13">Rating sort</text>
+    <rect x="18" y="78" width="338" height="36" rx="7" fill="#11100f" stroke="#4a443c"/>
+    <text x="34" y="101" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="13">High to low</text>
+    <rect x="18" y="126" width="74" height="28" rx="14" fill="#1d6f68" stroke="#2e8e84"/>
+    <text x="38" y="144" fill="#fff" font-family="Segoe UI, Arial" font-size="12">review</text>
+    <rect x="102" y="126" width="70" height="28" rx="14" fill="#24211d" stroke="#4a443c"/>
+    <text x="120" y="144" fill="#d5cbbb" font-family="Segoe UI, Arial" font-size="12">scene</text>
+    <rect x="0" y="180" width="374" height="310" rx="8" fill="#1a1815" stroke="#39342d"/>
+    <text x="18" y="212" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="18" font-weight="700">Highlights</text>
+    <rect x="18" y="230" width="338" height="38" rx="7" fill="#211b12" stroke="#5a4b31"/>
+    <text x="34" y="254" fill="#f2c673" font-family="Segoe UI, Arial" font-size="13">02:16 / 14:30</text>
+    <rect x="18" y="286" width="154" height="34" rx="7" fill="#24211d" stroke="#4a443c"/>
+    <text x="58" y="308" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="13">Set start</text>
+    <rect x="184" y="286" width="154" height="34" rx="7" fill="#24211d" stroke="#4a443c"/>
+    <text x="226" y="308" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="13">Set end</text>
+    <rect x="18" y="338" width="338" height="64" rx="7" fill="#11100f" stroke="#4a443c"/>
+    <text x="34" y="364" fill="#9f9486" font-family="Segoe UI, Arial" font-size="13">Important action, keep this range...</text>
+    <rect x="18" y="420" width="338" height="44" rx="7" fill="#1d6f68" stroke="#2e8e84"/>
+    <text x="136" y="448" fill="#fff" font-family="Segoe UI, Arial" font-size="14" font-weight="700">Save highlight</text>
+    <rect x="0" y="514" width="374" height="86" rx="8" fill="#1a1815" stroke="#39342d"/>
+    <text x="18" y="546" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="18" font-weight="700">History</text>
+    <text x="18" y="572" fill="#9f9486" font-family="Segoe UI, Arial" font-size="13">Resume watched videos from the sidebar.</text>
+  </g>
+</svg>

@@ -827,11 +827,55 @@ video {
   min-height: 70px;
 }
 
+.magnetRecordList {
+  display: grid;
+  gap: 10px;
+}
+
 .downloadStatus {
   border: 1px solid #332f29;
   border-radius: 7px;
   padding: 10px;
   background: #151412;
+}
+
+.magnetRecord {
+  display: grid;
+  gap: 8px;
+}
+
+.magnetRecordHeader {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.magnetRecordHeader strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #f4eee5;
+  font-size: 13px;
+}
+
+.magnetRecordHeader span {
+  flex: none;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #25221d;
+  color: #bfb5a7;
+  font-size: 11px;
+}
+
+.magnetRecordActions {
+  margin-top: 0;
+}
+
+.magnetRecordActions button:not(.iconButton) {
+  min-height: 30px;
 }
 
 .downloadStatus.resolving,

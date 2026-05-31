@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
+  <title id="title">Lplay multi-video overview</title>
+  <desc id="desc">A dark desktop video player interface with multi-video grid, toolbar, and right sidebar.</desc>
+  <rect width="1280" height="760" fill="#11100f"/>
+  <rect x="0" y="0" width="1280" height="58" fill="#161411"/>
+  <rect x="0" y="58" width="1280" height="1" fill="#39342d"/>
+  <g transform="translate(24 16)">
+    <rect x="0" y="4" width="24" height="18" rx="3" fill="none" stroke="#48b7aa" stroke-width="3"/>
+    <path d="M24 10 L36 4 V26 L24 20 Z" fill="none" stroke="#48b7aa" stroke-width="3" stroke-linejoin="round"/>
+    <text x="52" y="17" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="22" font-weight="700">Lplay</text>
+    <text x="52" y="36" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="13">4 videos</text>
+  </g>
+  <g transform="translate(872 12)" fill="none" stroke="#4a443c" stroke-width="1">
+    <rect x="0" y="0" width="120" height="34" rx="7" fill="#1d6f68" stroke="#2e8e84"/>
+    <text x="38" y="23" fill="#fff" font-family="Segoe UI, Arial" font-size="14" font-weight="600">Add</text>
+    <rect x="132" y="0" width="38" height="34" rx="7" fill="#24211d"/>
+    <rect x="180" y="0" width="38" height="34" rx="7" fill="#24211d"/>
+    <rect x="228" y="0" width="38" height="34" rx="7" fill="#24211d"/>
+    <rect x="276" y="0" width="38" height="34" rx="7" fill="#24211d"/>
+    <rect x="324" y="0" width="38" height="34" rx="7" fill="#24211d"/>
+  </g>
+  <rect x="16" y="76" width="900" height="668" rx="8" fill="#151412" stroke="#39342d"/>
+  <g transform="translate(32 92)">
+    <g>
+      <rect x="0" y="0" width="420" height="300" rx="8" fill="#1c1a17" stroke="#48b7aa"/>
+      <rect x="12" y="12" width="396" height="34" rx="6" fill="#171512"/>
+      <text x="24" y="35" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="15" font-weight="600">camera-a.mp4</text>
+      <rect x="322" y="17" width="48" height="24" rx="12" fill="#2a2318" stroke="#5a4b31"/>
+      <text x="335" y="34" fill="#f1c46d" font-family="Segoe UI, Arial" font-size="12">MP4</text>
+      <rect x="12" y="58" width="396" height="190" fill="#050505"/>
+      <rect x="48" y="86" width="310" height="136" rx="8" fill="#2f3436"/>
+      <circle cx="203" cy="154" r="34" fill="#48b7aa" opacity=".22"/>
+      <path d="M194 134 L194 174 L226 154 Z" fill="#f1c46d"/>
+      <text x="18" y="274" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="12">00:42 / 12:30</text>
+      <text x="332" y="274" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="12">2 highlights</text>
+    </g>
+    <g transform="translate(438 0)">
+      <rect x="0" y="0" width="420" height="300" rx="8" fill="#1c1a17" stroke="#332f29"/>
+      <rect x="12" y="12" width="396" height="34" rx="6" fill="#171512"/>
+      <text x="24" y="35" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="15" font-weight="600">meeting.mov</text>
+      <rect x="12" y="58" width="396" height="190" fill="#050505"/>
+      <rect x="76" y="88" width="250" height="132" rx="10" fill="#3b2f27"/>
+      <path d="M184 132 L184 176 L222 154 Z" fill="#f1c46d"/>
+      <text x="18" y="274" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="12">03:10 / 18:05</text>
+      <text x="338" y="274" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="12">1 highlight</text>
+    </g>
+    <g transform="translate(0 318)">
+      <rect x="0" y="0" width="420" height="300" rx="8" fill="#1c1a17" stroke="#332f29"/>
+      <rect x="12" y="12" width="396" height="34" rx="6" fill="#171512"/>
+      <text x="24" y="35" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="15" font-weight="600">review.avi</text>
+      <rect x="12" y="58" width="396" height="190" fill="#050505"/>
+      <rect x="70" y="92" width="262" height="124" rx="8" fill="#263733"/>
+      <path d="M186 134 L186 174 L220 154 Z" fill="#f1c46d"/>
+      <text x="18" y="274" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="12">00:00 / 09:44</text>
+      <text x="340" y="274" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="12">0 highlights</text>
+    </g>
+    <g transform="translate(438 318)">
+      <rect x="0" y="0" width="420" height="300" rx="8" fill="#1c1a17" stroke="#332f29"/>
+      <rect x="12" y="12" width="396" height="34" rx="6" fill="#171512"/>
+      <text x="24" y="35" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="15" font-weight="600">clip.mkv</text>
+      <rect x="12" y="58" width="396" height="190" fill="#050505"/>
+      <rect x="86" y="84" width="230" height="140" rx="8" fill="#362d3d"/>
+      <path d="M186 134 L186 174 L220 154 Z" fill="#f1c46d"/>
+      <text x="18" y="274" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="12">01:24 / 07:21</text>
+      <text x="332" y="274" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="12">3 highlights</text>
+    </g>
+  </g>
+  <rect x="932" y="76" width="332" height="668" rx="8" fill="#151412" stroke="#39342d"/>
+  <g transform="translate(948 96)">
+    <rect x="0" y="0" width="300" height="104" rx="8" fill="#1a1815" stroke="#39342d"/>
+    <text x="18" y="30" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="17" font-weight="700">Filter and Sort</text>
+    <rect x="18" y="48" width="264" height="34" rx="7" fill="#11100f" stroke="#4a443c"/>
+    <text x="30" y="70" fill="#bfb5a7" font-family="Segoe UI, Arial" font-size="13">Rating: high to low</text>
+    <rect x="0" y="120" width="300" height="154" rx="8" fill="#1a1815" stroke="#39342d"/>
+    <text x="18" y="150" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="17" font-weight="700">Highlights</text>
+    <rect x="18" y="168" width="264" height="34" rx="7" fill="#11100f" stroke="#5a4b31"/>
+    <text x="30" y="190" fill="#f1c46d" font-family="Segoe UI, Arial" font-size="13">00:42 / 12:30</text>
+    <rect x="18" y="216" width="112" height="34" rx="7" fill="#1d6f68" stroke="#2e8e84"/>
+    <text x="42" y="238" fill="#fff" font-family="Segoe UI, Arial" font-size="13">Save</text>
+    <rect x="0" y="290" width="300" height="174" rx="8" fill="#1a1815" stroke="#39342d"/>
+    <text x="18" y="320" fill="#f4eee5" font-family="Segoe UI, Arial" font-size="17" font-weight="700">M3U8 to MP4</text>
+    <rect x="18" y="340" width="264" height="34" rx="7" fill="#11100f" stroke="#4a443c"/>
+    <rect x="18" y="390" width="264" height="34" rx="7" fill="#11100f" stroke="#4a443c"/>
+    <rect x="18" y="444" width="92" height="34" rx="7" fill="#1d6f68" stroke="#2e8e84"/>
+    <text x="42" y="466" fill="#fff" font-family="Segoe UI, Arial" font-size="13">Start</text>
+  </g>
+</svg>

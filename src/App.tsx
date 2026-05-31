@@ -36,7 +36,9 @@ const HIGHLIGHT_STORAGE_KEY = "lplay.highlights.v1";
 const HISTORY_STORAGE_KEY = "lplay.history.v1";
 const UI_STORAGE_KEY = "lplay.ui.v1";
 const VIDEO_METADATA_STORAGE_KEY = "lplay.videoMetadata.v1";
+const MAGNET_RECORD_STORAGE_KEY = "lplay.magnetRecords.v1";
 const MAX_TAGS_PER_VIDEO = 12;
+const MAX_MAGNET_RECORDS = 20;
 
 type HighlightLibrary = Record<string, Highlight[]>;
 
@@ -66,6 +68,11 @@ type PlaybackHistoryItem = {
   currentTime: number;
   lastOpenedAt: number;
   lastPlayedAt: number;
+};
+
+type MagnetRecord = MagnetProgress & {
+  createdAt: number;
+  updatedAt: number;
 };
 
 const SORT_MODES = ["added", "rating-desc", "rating-asc"] as const;
@@ -191,6 +198,75 @@ function loadVideoMetadataLibrary(): VideoMetadataLibrary {
     }, {});
   } catch {
     return {};
+  }
+}
+
+function normalizeMagnetRecord(value: unknown): MagnetRecord | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const entry = value as Record<string, unknown>;
+  const jobId = typeof entry.jobId === "string" ? entry.jobId : "";
+  const magnetUri = typeof entry.magnetUri === "string" ? entry.magnetUri : "";
+  const downloadDir = typeof entry.downloadDir === "string" ? entry.downloadDir : "";
+  const status = typeof entry.status === "string" ? entry.status : "error";
+  const validStatus = ["resolving", "downloading", "done", "error", "cancelled"].includes(status)
+    ? (status as MagnetRecord["status"])
+    : "error";
+  const createdAt = Number(entry.createdAt);
+  const updatedAt = Number(entry.updatedAt);
+
+  if (!jobId || !magnetUri) {
+    return null;
+  }
+
+  const restoredStatus = validStatus === "resolving" || validStatus === "downloading" ? "cancelled" : validStatus;
+
+  return {
+    jobId,
+    magnetUri,
+    downloadDir,
+    status: restoredStatus,
+    name: typeof entry.name === "string" ? entry.name : "",
+    infoHash: typeof entry.infoHash === "string" ? entry.infoHash : "",
+    percent: typeof entry.percent === "number" ? entry.percent : undefined,
+    downloaded: typeof entry.downloaded === "number" ? entry.downloaded : undefined,
+    total: typeof entry.total === "number" ? entry.total : undefined,
+    downloadSpeed: 0,
+    uploadSpeed: 0,
+    peers: 0,
+    message:
+      restoredStatus !== validStatus
+        ? "应用已关闭，任务已停止，可手动重试。"
+        : typeof entry.message === "string"
+          ? entry.message
+          : undefined,
+    files: Array.isArray(entry.files) ? (entry.files as MagnetRecord["files"]) : undefined,
+    createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
+    updatedAt: Number.isFinite(updatedAt) ? updatedAt : Date.now()
+  };
+}
+
+function loadMagnetRecords() {
+  try {
+    const raw = localStorage.getItem(MAGNET_RECORD_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .map((item) => normalizeMagnetRecord(item))
+      .filter((item): item is MagnetRecord => Boolean(item))
+      .sort((left, right) => right.updatedAt - left.updatedAt)
+      .slice(0, MAX_MAGNET_RECORDS);
+  } catch {
+    return [];
   }
 }
 
@@ -326,6 +402,26 @@ function isMagnetLink(value: string) {
   return /^magnet:\?xt=urn:btih:/i.test(value.trim());
 }
 
+function isMagnetBusy(record?: Pick<MagnetProgress, "status"> | null) {
+  return record?.status === "resolving" || record?.status === "downloading";
+}
+
+function magnetStatusLabel(status: MagnetProgress["status"]) {
+  switch (status) {
+    case "resolving":
+      return "解析中";
+    case "downloading":
+      return "下载中";
+    case "done":
+      return "已完成";
+    case "cancelled":
+      return "已取消";
+    case "error":
+    default:
+      return "错误";
+  }
+}
+
 export default function App() {
   const [initialUi] = useState(() => loadUiState());
   const [media, setMedia] = useState<PreparedMedia[]>([]);
@@ -347,7 +443,7 @@ export default function App() {
   const [download, setDownload] = useState<DownloadState | null>(null);
   const [magnetUri, setMagnetUri] = useState("");
   const [magnetDownloadDir, setMagnetDownloadDir] = useState("");
-  const [magnetDownload, setMagnetDownload] = useState<MagnetProgress | null>(null);
+  const [magnetRecords, setMagnetRecords] = useState<MagnetRecord[]>(() => loadMagnetRecords());
   const videoRefs = useRef(new Map<string, HTMLVideoElement>());
   const compatibilityRetries = useRef(new Set<string>());
   const decodeWatchers = useRef(new Map<string, number>());
@@ -385,6 +481,7 @@ export default function App() {
   }, [media, sortMode, tagFilter, videoMetadata]);
 
   const activeMedia = media.find((item) => item.id === activeId) || visibleMedia[0] || media[0];
+  const activeMagnetRecord = magnetRecords.find((record) => isMagnetBusy(record));
   const activeState = activeMedia ? playback[activeMedia.id] : undefined;
   const activeHighlights = activeMedia ? highlights[activeMedia.sourcePath] || [] : [];
   const sortedActiveHighlights = useMemo(
@@ -403,6 +500,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(VIDEO_METADATA_STORAGE_KEY, JSON.stringify(videoMetadata));
   }, [videoMetadata]);
+
+  useEffect(() => {
+    localStorage.setItem(MAGNET_RECORD_STORAGE_KEY, JSON.stringify(magnetRecords.slice(0, MAX_MAGNET_RECORDS)));
+  }, [magnetRecords]);
 
   useEffect(() => {
     localStorage.setItem(UI_STORAGE_KEY, JSON.stringify({ inspectorOpen, sortMode, tagFilter }));
@@ -435,7 +536,7 @@ export default function App() {
     });
 
     const unsubscribeMagnet = window.lplay.onMagnetProgress((payload: MagnetProgress) => {
-      setMagnetDownload((current) => (!current || current.jobId === payload.jobId ? payload : current));
+      upsertMagnetRecord(payload);
       if (payload.downloadDir) {
         setMagnetDownloadDir(payload.downloadDir);
       }
@@ -553,6 +654,32 @@ export default function App() {
 
   function setVideoTags(sourcePath: string, value: string) {
     updateVideoMetadata(sourcePath, { tags: parseTags(value) });
+  }
+
+  function upsertMagnetRecord(payload: MagnetProgress) {
+    setMagnetRecords((current) => {
+      const now = Date.now();
+      const existing = current.find((record) => record.jobId === payload.jobId);
+      const nextRecord: MagnetRecord = {
+        ...existing,
+        ...payload,
+        createdAt: existing?.createdAt || now,
+        updatedAt: now
+      };
+
+      return [nextRecord, ...current.filter((record) => record.jobId !== payload.jobId)]
+        .sort((left, right) => right.updatedAt - left.updatedAt)
+        .slice(0, MAX_MAGNET_RECORDS);
+    });
+  }
+
+  function removeMagnetRecord(jobId: string) {
+    const record = magnetRecords.find((item) => item.jobId === jobId);
+    if (isMagnetBusy(record)) {
+      void window.lplay.cancelMagnetDownload(jobId);
+    }
+
+    setMagnetRecords((current) => current.filter((item) => item.jobId !== jobId));
   }
 
   function registerVideoRef(id: string) {
@@ -1021,25 +1148,26 @@ export default function App() {
     }
   }
 
-  async function startMagnetDownload() {
-    const source = magnetUri.trim();
+  async function startMagnetDownload(sourceValue = magnetUri, downloadDirValue = magnetDownloadDir) {
+    const source = sourceValue.trim();
     const jobId = randomId();
 
     if (!isMagnetLink(source)) {
-      setMagnetDownload({
+      upsertMagnetRecord({
         jobId,
         magnetUri: source,
-        downloadDir: magnetDownloadDir,
+        downloadDir: downloadDirValue,
         status: "error",
         message: "请输入有效的磁力链接。"
       });
       return;
     }
 
-    setMagnetDownload({
+    setMagnetUri(source);
+    upsertMagnetRecord({
       jobId,
       magnetUri: source,
-      downloadDir: magnetDownloadDir,
+      downloadDir: downloadDirValue,
       status: "resolving",
       percent: 0,
       message: "正在解析磁力链接"
@@ -1049,45 +1177,46 @@ export default function App() {
       const started = await window.lplay.startMagnetDownload({
         jobId,
         magnetUri: source,
-        downloadDir: magnetDownloadDir
+        downloadDir: downloadDirValue
       });
-      setMagnetDownload(started);
+      upsertMagnetRecord(started);
       if (started.downloadDir) {
         setMagnetDownloadDir(started.downloadDir);
       }
     } catch (error) {
-      setMagnetDownload((current) =>
-        current?.jobId === jobId
-          ? {
-              ...current,
-              status: "error",
-              message: error instanceof Error ? error.message : "磁力下载启动失败"
-            }
-          : current
-      );
+      upsertMagnetRecord({
+        jobId,
+        magnetUri: source,
+        downloadDir: downloadDirValue,
+        status: "error",
+        message: error instanceof Error ? error.message : "磁力下载启动失败"
+      });
     }
   }
 
-  async function cancelMagnetDownload() {
-    if (!magnetDownload || !["resolving", "downloading"].includes(magnetDownload.status)) {
+  async function cancelMagnetDownload(jobId = activeMagnetRecord?.jobId) {
+    if (!jobId) {
       return;
     }
 
-    await window.lplay.cancelMagnetDownload(magnetDownload.jobId);
-    setMagnetDownload((current) =>
-      current
-        ? {
-            ...current,
-            status: "cancelled",
-            message: "已取消"
-          }
-        : current
+    await window.lplay.cancelMagnetDownload(jobId);
+    setMagnetRecords((current) =>
+      current.map((record) =>
+        record.jobId === jobId
+          ? {
+              ...record,
+              status: "cancelled",
+              message: "已取消",
+              updatedAt: Date.now()
+            }
+          : record
+      )
     );
   }
 
   const activeDuration = activeState?.duration || activeMedia?.metadata?.duration || 0;
   const canDownload = Boolean(m3u8Source.trim() && m3u8Output.trim() && download?.status !== "running");
-  const magnetBusy = magnetDownload?.status === "resolving" || magnetDownload?.status === "downloading";
+  const magnetBusy = Boolean(activeMagnetRecord);
   const canStartMagnetDownload = isMagnetLink(magnetUri) && !magnetBusy;
   const latestConversion = Object.values(conversionJobs).slice(-3).reverse();
   const videoCountText = tagFilter ? `${visibleMedia.length}/${media.length}` : `${media.length}`;
@@ -1554,11 +1683,11 @@ export default function App() {
               </label>
 
               <div className="buttonCluster">
-                <button className="primaryButton" type="button" onClick={startMagnetDownload} disabled={!canStartMagnetDownload}>
+                <button className="primaryButton" type="button" onClick={() => void startMagnetDownload()} disabled={!canStartMagnetDownload}>
                   <Download size={17} />
                   下载
                 </button>
-                <button className="iconButton" type="button" onClick={cancelMagnetDownload} disabled={!magnetBusy} title="取消下载">
+                <button className="iconButton" type="button" onClick={() => void cancelMagnetDownload()} disabled={!magnetBusy} title="取消下载">
                   <X size={17} />
                 </button>
                 <button
@@ -1572,39 +1701,74 @@ export default function App() {
                 </button>
               </div>
 
-              {magnetDownload && (
-                <div className={`downloadStatus ${magnetDownload.status}`}>
-                  <div className="progressBar">
-                    <span style={{ width: `${magnetDownload.percent ?? (magnetBusy ? 12 : 0)}%` }} />
-                  </div>
-                  <div className="downloadMeta">
-                    <span>{magnetDownload.name || magnetDownload.message || magnetDownload.status}</span>
-                    <span>
-                      {magnetDownload.percent !== undefined ? `${Math.round(magnetDownload.percent)}%` : magnetDownload.status}
-                    </span>
-                  </div>
-                  <div className="downloadMeta">
-                    <span>
-                      {formatBytes(magnetDownload.downloaded)} / {formatBytes(magnetDownload.total)}
-                    </span>
-                    <span>
-                      {formatBytes(magnetDownload.downloadSpeed)}/s · {magnetDownload.peers || 0} peers
-                    </span>
-                  </div>
-                  {magnetDownload.message && <p className="downloadMessage">{magnetDownload.message}</p>}
-                  {magnetDownload.files && magnetDownload.files.length > 0 && (
-                    <div className="magnetFileList">
-                      {magnetDownload.files.slice(0, 5).map((file) => (
-                        <div className="magnetFileItem" key={file.path}>
-                          <span>{file.name}</span>
-                          <small>
-                            {Math.round(file.progress)}% · {formatBytes(file.downloaded)} / {formatBytes(file.length)}
-                          </small>
+              {magnetRecords.length === 0 ? (
+                <p className="mutedText">下载记录会显示在这里；取消、失败或完成后可手动重试或删除。</p>
+              ) : (
+                <div className="magnetRecordList">
+                  {magnetRecords.map((record) => {
+                    const recordBusy = isMagnetBusy(record);
+                    return (
+                      <div className={`downloadStatus magnetRecord ${record.status}`} key={record.jobId}>
+                        <div className="magnetRecordHeader">
+                          <strong>{record.name || record.message || "磁力任务"}</strong>
+                          <span>{magnetStatusLabel(record.status)}</span>
                         </div>
-                      ))}
-                      {magnetDownload.files.length > 5 && <small className="mutedText">还有 {magnetDownload.files.length - 5} 个文件</small>}
-                    </div>
-                  )}
+                        <div className="progressBar">
+                          <span style={{ width: `${record.percent ?? (recordBusy ? 12 : 0)}%` }} />
+                        </div>
+                        <div className="downloadMeta">
+                          <span>
+                            {formatBytes(record.downloaded)} / {formatBytes(record.total)}
+                          </span>
+                          <span>
+                            {formatBytes(record.downloadSpeed)}/s · {record.peers || 0} peers
+                          </span>
+                        </div>
+                        {record.message && <p className="downloadMessage">{record.message}</p>}
+                        <div className="buttonCluster magnetRecordActions">
+                          <button
+                            type="button"
+                            onClick={() => void startMagnetDownload(record.magnetUri, record.downloadDir)}
+                            disabled={magnetBusy || !isMagnetLink(record.magnetUri)}
+                            title="重试"
+                          >
+                            <RotateCcw size={15} />
+                            重试
+                          </button>
+                          <button
+                            className="iconButton"
+                            type="button"
+                            onClick={() => record.downloadDir && window.lplay.revealPath(record.downloadDir)}
+                            disabled={!record.downloadDir}
+                            title="打开下载文件夹"
+                          >
+                            <FolderOpen size={15} />
+                          </button>
+                          <button
+                            className="iconButton"
+                            type="button"
+                            onClick={() => (recordBusy ? void cancelMagnetDownload(record.jobId) : removeMagnetRecord(record.jobId))}
+                            title={recordBusy ? "取消" : "删除记录"}
+                          >
+                            {recordBusy ? <X size={15} /> : <Trash2 size={15} />}
+                          </button>
+                        </div>
+                        {record.files && record.files.length > 0 && (
+                          <div className="magnetFileList">
+                            {record.files.slice(0, 5).map((file) => (
+                              <div className="magnetFileItem" key={file.path}>
+                                <span>{file.name}</span>
+                                <small>
+                                  {Math.round(file.progress)}% · {formatBytes(file.downloaded)} / {formatBytes(file.length)}
+                                </small>
+                              </div>
+                            ))}
+                            {record.files.length > 5 && <small className="mutedText">还有 {record.files.length - 5} 个文件</small>}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
