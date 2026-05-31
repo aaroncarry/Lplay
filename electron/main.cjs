@@ -35,8 +35,11 @@ const KNOWN_VIDEO_EXTENSIONS = new Set([
 ]);
 
 const runningM3u8Jobs = new Map();
+const runningMagnetJobs = new Map();
 const dropImports = new Map();
 const mediaFiles = new Map();
+let webTorrentConstructorPromise;
+let magnetClientPromise;
 let mediaServerPort = 0;
 let mediaServer;
 
@@ -244,6 +247,7 @@ app.on("window-all-closed", () => {
   if (mediaServer) {
     mediaServer.close();
   }
+  void destroyMagnetClient();
   if (process.platform !== "darwin") {
     app.quit();
   }
@@ -274,6 +278,174 @@ function safeImportedFileName(fileName) {
   const extension = path.extname(fileName).toLowerCase().replace(/[^a-z0-9.]/g, "");
   const baseName = safeBaseName(fileName) || "dropped-video";
   return `${baseName}${extension}`;
+}
+
+function settingsPath() {
+  return path.join(app.getPath("userData"), "settings.json");
+}
+
+function loadSettings() {
+  try {
+    const raw = fs.readFileSync(settingsPath(), "utf8");
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function saveSettings(patch) {
+  const next = {
+    ...loadSettings(),
+    ...patch
+  };
+  await fs.promises.mkdir(path.dirname(settingsPath()), { recursive: true });
+  await fs.promises.writeFile(settingsPath(), JSON.stringify(next, null, 2), "utf8");
+  return next;
+}
+
+function defaultMagnetDownloadDir() {
+  return path.join(app.getPath("downloads"), "Lplay");
+}
+
+function getMagnetDownloadDir() {
+  const settings = loadSettings();
+  return settings.magnetDownloadDir || defaultMagnetDownloadDir();
+}
+
+async function setMagnetDownloadDir(downloadDir) {
+  const resolved = path.resolve(String(downloadDir || "").trim() || defaultMagnetDownloadDir());
+  await fs.promises.mkdir(resolved, { recursive: true });
+  await saveSettings({ magnetDownloadDir: resolved });
+  return resolved;
+}
+
+function normalizeMagnetUri(value) {
+  const magnetUri = String(value || "").trim();
+  if (!/^magnet:\?xt=urn:btih:/i.test(magnetUri)) {
+    throw new Error("Invalid magnet link.");
+  }
+  return magnetUri;
+}
+
+function safeTorrentOutputPath(downloadDir, relativePath) {
+  const root = path.resolve(downloadDir);
+  const candidate = path.resolve(root, path.normalize(String(relativePath || "")));
+  return candidate === root || candidate.startsWith(`${root}${path.sep}`) ? candidate : root;
+}
+
+function formatMagnetFiles(job) {
+  const torrent = job.torrent;
+  return (torrent.files || []).map((file) => ({
+    name: file.name,
+    path: safeTorrentOutputPath(job.downloadDir, file.path),
+    length: file.length || 0,
+    downloaded: file.downloaded || 0,
+    progress: Number.isFinite(file.progress) ? file.progress * 100 : 0
+  }));
+}
+
+function createMagnetSnapshot(job, status = job.status, message = job.message) {
+  const torrent = job.torrent;
+  const total = torrent.length || 0;
+  const downloaded = torrent.downloaded || 0;
+
+  return {
+    jobId: job.jobId,
+    magnetUri: job.magnetUri,
+    downloadDir: job.downloadDir,
+    status,
+    name: torrent.name || job.name || "",
+    infoHash: torrent.infoHash || "",
+    percent: total > 0 ? Math.max(0, Math.min(100, (torrent.progress || 0) * 100)) : undefined,
+    downloaded,
+    total,
+    downloadSpeed: torrent.downloadSpeed || 0,
+    uploadSpeed: torrent.uploadSpeed || 0,
+    peers: torrent.numPeers || 0,
+    message,
+    files: formatMagnetFiles(job),
+    updatedAt: Date.now()
+  };
+}
+
+function emitMagnetProgress(job, status = job.status, message = job.message) {
+  job.status = status;
+  job.message = message;
+  sendToRenderer(job.sender, "magnet:progress", createMagnetSnapshot(job, status, message));
+}
+
+function clearMagnetTimer(job) {
+  if (job.timer) {
+    clearInterval(job.timer);
+    job.timer = undefined;
+  }
+}
+
+async function stopMagnetJob(jobId, status = "cancelled", message = "Download stopped") {
+  const job = runningMagnetJobs.get(jobId);
+  if (!job) {
+    return false;
+  }
+
+  clearMagnetTimer(job);
+  emitMagnetProgress(job, status, message);
+  runningMagnetJobs.delete(jobId);
+
+  try {
+    const client = await getMagnetClient();
+    await new Promise((resolve) => client.remove(job.torrent, { destroyStore: false }, () => resolve()));
+  } catch {
+    try {
+      if (!job.torrent.destroyed) {
+        await new Promise((resolve) => job.torrent.destroy({ destroyStore: false }, () => resolve()));
+      }
+    } catch {
+      // Ignore shutdown errors from already-destroyed torrents.
+    }
+  }
+
+  return true;
+}
+
+async function loadWebTorrentConstructor() {
+  if (!webTorrentConstructorPromise) {
+    webTorrentConstructorPromise = import("webtorrent").then((module) => module.default || module.WebTorrent || module);
+  }
+  return webTorrentConstructorPromise;
+}
+
+async function getMagnetClient() {
+  if (!magnetClientPromise) {
+    magnetClientPromise = loadWebTorrentConstructor().then((WebTorrent) => {
+      const client = new WebTorrent();
+      client.on("error", (error) => {
+        console.error("[magnet]", error);
+      });
+      return client;
+    });
+  }
+  return magnetClientPromise;
+}
+
+async function destroyMagnetClient() {
+  for (const job of runningMagnetJobs.values()) {
+    clearMagnetTimer(job);
+  }
+  runningMagnetJobs.clear();
+
+  if (!magnetClientPromise) {
+    return;
+  }
+
+  try {
+    const client = await magnetClientPromise;
+    await new Promise((resolve) => client.destroy(() => resolve()));
+  } catch {
+    // App shutdown should continue even if the torrent client is already closed.
+  } finally {
+    magnetClientPromise = undefined;
+  }
 }
 
 function normalizePossibleFileUrl(value) {
@@ -857,6 +1029,97 @@ ipcMain.handle("m3u8:cancel", async (_event, jobId) => {
     return true;
   }
   return false;
+});
+
+ipcMain.handle("magnet:get-download-dir", async () => {
+  return setMagnetDownloadDir(getMagnetDownloadDir());
+});
+
+ipcMain.handle("magnet:choose-download-dir", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "选择默认下载文件夹",
+    defaultPath: getMagnetDownloadDir(),
+    properties: ["openDirectory", "createDirectory"]
+  });
+
+  if (result.canceled || !result.filePaths[0]) {
+    return "";
+  }
+
+  return setMagnetDownloadDir(result.filePaths[0]);
+});
+
+ipcMain.handle("magnet:start", async (event, options) => {
+  const jobId = options?.jobId || crypto.randomUUID();
+  const magnetUri = normalizeMagnetUri(options?.magnetUri);
+  const downloadDir = await setMagnetDownloadDir(options?.downloadDir || getMagnetDownloadDir());
+  const client = await getMagnetClient();
+
+  const torrent = client.add(magnetUri, {
+    path: downloadDir
+  });
+
+  const job = {
+    jobId,
+    magnetUri,
+    downloadDir,
+    sender: event.sender,
+    torrent,
+    status: "resolving",
+    message: "Resolving magnet metadata"
+  };
+
+  runningMagnetJobs.set(jobId, job);
+  emitMagnetProgress(job, "resolving", "Resolving magnet metadata");
+
+  job.timer = setInterval(() => {
+    if (!torrent.destroyed) {
+      emitMagnetProgress(job, torrent.done ? "done" : "downloading", torrent.done ? "Download complete" : "Downloading");
+    }
+  }, 1000);
+
+  torrent.on("infoHash", () => {
+    emitMagnetProgress(job, "resolving", "Looking for peers");
+  });
+
+  torrent.on("metadata", () => {
+    emitMagnetProgress(job, "downloading", "Metadata loaded");
+  });
+
+  torrent.on("ready", () => {
+    emitMagnetProgress(job, "downloading", "Downloading");
+  });
+
+  torrent.on("download", () => {
+    const now = Date.now();
+    if (!job.lastDownloadEmit || now - job.lastDownloadEmit > 650) {
+      job.lastDownloadEmit = now;
+      emitMagnetProgress(job, "downloading", "Downloading");
+    }
+  });
+
+  torrent.on("noPeers", (source) => {
+    emitMagnetProgress(job, "resolving", `No peers from ${source}`);
+  });
+
+  torrent.on("warning", (error) => {
+    emitMagnetProgress(job, job.status, error.message);
+  });
+
+  torrent.on("error", (error) => {
+    void stopMagnetJob(jobId, "error", error.message);
+  });
+
+  torrent.on("done", () => {
+    emitMagnetProgress(job, "done", "Download complete");
+    void stopMagnetJob(jobId, "done", "Download complete");
+  });
+
+  return createMagnetSnapshot(job, "resolving", "Resolving magnet metadata");
+});
+
+ipcMain.handle("magnet:cancel", async (_event, jobId) => {
+  return stopMagnetJob(jobId, "cancelled", "Download cancelled");
 });
 
 ipcMain.handle("shell:show-path", async (_event, filePath) => {

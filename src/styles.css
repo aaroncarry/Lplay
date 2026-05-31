@@ -823,6 +823,10 @@ video {
   gap: 8px;
 }
 
+.magnetInput {
+  min-height: 70px;
+}
+
 .downloadStatus {
   border: 1px solid #332f29;
   border-radius: 7px;
@@ -830,11 +834,17 @@ video {
   background: #151412;
 }
 
+.downloadStatus.resolving,
+.downloadStatus.downloading {
+  border-color: #5a4b31;
+}
+
 .downloadStatus.done {
   border-color: #2e8e84;
 }
 
-.downloadStatus.error {
+.downloadStatus.error,
+.downloadStatus.cancelled {
   border-color: #a8483b;
 }
 
@@ -854,8 +864,50 @@ video {
   transition: width 160ms ease;
 }
 
-.downloadStatus.error .progressBar span {
+.downloadStatus.error .progressBar span,
+.downloadStatus.cancelled .progressBar span {
   background: #e66f5c;
+}
+
+.downloadMessage {
+  margin: 8px 0 0;
+  color: #9f9486;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.magnetFileList {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.magnetFileItem {
+  min-width: 0;
+  border: 1px solid #2f2a25;
+  border-radius: 7px;
+  padding: 7px 8px;
+  background: #11100f;
+}
+
+.magnetFileItem span,
+.magnetFileItem small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.magnetFileItem span {
+  color: #e9ded0;
+  font-size: 12px;
+}
+
+.magnetFileItem small {
+  color: #9f9486;
+  margin-top: 2px;
 }
 
 .downloadMeta,

@@ -31,7 +31,12 @@ contextBridge.exposeInMainWorld("lplay", {
   chooseM3u8Output: (defaultName) => ipcRenderer.invoke("m3u8:choose-output", defaultName),
   downloadM3u8: (options) => ipcRenderer.invoke("m3u8:download", options),
   cancelM3u8: (jobId) => ipcRenderer.invoke("m3u8:cancel", jobId),
+  getMagnetDownloadDir: () => ipcRenderer.invoke("magnet:get-download-dir"),
+  chooseMagnetDownloadDir: () => ipcRenderer.invoke("magnet:choose-download-dir"),
+  startMagnetDownload: (options) => ipcRenderer.invoke("magnet:start", options),
+  cancelMagnetDownload: (jobId) => ipcRenderer.invoke("magnet:cancel", jobId),
   revealPath: (filePath) => ipcRenderer.invoke("shell:show-path", filePath),
   onConversionProgress: (callback) => subscribe("media:conversion-progress", callback),
-  onM3u8Progress: (callback) => subscribe("m3u8:progress", callback)
+  onM3u8Progress: (callback) => subscribe("m3u8:progress", callback),
+  onMagnetProgress: (callback) => subscribe("magnet:progress", callback)
 });

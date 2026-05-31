@@ -11,6 +11,7 @@ import {
   Highlighter,
   ListFilter,
   Loader2,
+  Magnet,
   PanelRightClose,
   PanelRightOpen,
   Pause,
@@ -29,7 +30,7 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ConversionProgress, Highlight, M3u8Progress, PlaybackState, PreparedMedia } from "./types";
+import type { ConversionProgress, Highlight, M3u8Progress, MagnetProgress, PlaybackState, PreparedMedia } from "./types";
 
 const HIGHLIGHT_STORAGE_KEY = "lplay.highlights.v1";
 const HISTORY_STORAGE_KEY = "lplay.history.v1";
@@ -309,6 +310,22 @@ function formatDateTime(value: number) {
   }).format(new Date(value));
 }
 
+function formatBytes(value?: number) {
+  const bytes = Number(value || 0);
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const amount = bytes / 1024 ** index;
+  return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`;
+}
+
+function isMagnetLink(value: string) {
+  return /^magnet:\?xt=urn:btih:/i.test(value.trim());
+}
+
 export default function App() {
   const [initialUi] = useState(() => loadUiState());
   const [media, setMedia] = useState<PreparedMedia[]>([]);
@@ -328,6 +345,9 @@ export default function App() {
   const [m3u8Source, setM3u8Source] = useState("");
   const [m3u8Output, setM3u8Output] = useState("");
   const [download, setDownload] = useState<DownloadState | null>(null);
+  const [magnetUri, setMagnetUri] = useState("");
+  const [magnetDownloadDir, setMagnetDownloadDir] = useState("");
+  const [magnetDownload, setMagnetDownload] = useState<MagnetProgress | null>(null);
   const videoRefs = useRef(new Map<string, HTMLVideoElement>());
   const compatibilityRetries = useRef(new Set<string>());
   const decodeWatchers = useRef(new Map<string, number>());
@@ -414,10 +434,26 @@ export default function App() {
       });
     });
 
+    const unsubscribeMagnet = window.lplay.onMagnetProgress((payload: MagnetProgress) => {
+      setMagnetDownload((current) => (!current || current.jobId === payload.jobId ? payload : current));
+      if (payload.downloadDir) {
+        setMagnetDownloadDir(payload.downloadDir);
+      }
+    });
+
     return () => {
       unsubscribeConversion();
       unsubscribeM3u8();
+      unsubscribeMagnet();
     };
+  }, []);
+
+  useEffect(() => {
+    void window.lplay.getMagnetDownloadDir().then((downloadDir) => {
+      if (downloadDir) {
+        setMagnetDownloadDir(downloadDir);
+      }
+    });
   }, []);
 
   useEffect(() => {
@@ -978,8 +1014,81 @@ export default function App() {
     );
   }
 
+  async function chooseMagnetDownloadDir() {
+    const picked = await window.lplay.chooseMagnetDownloadDir();
+    if (picked) {
+      setMagnetDownloadDir(picked);
+    }
+  }
+
+  async function startMagnetDownload() {
+    const source = magnetUri.trim();
+    const jobId = randomId();
+
+    if (!isMagnetLink(source)) {
+      setMagnetDownload({
+        jobId,
+        magnetUri: source,
+        downloadDir: magnetDownloadDir,
+        status: "error",
+        message: "请输入有效的磁力链接。"
+      });
+      return;
+    }
+
+    setMagnetDownload({
+      jobId,
+      magnetUri: source,
+      downloadDir: magnetDownloadDir,
+      status: "resolving",
+      percent: 0,
+      message: "正在解析磁力链接"
+    });
+
+    try {
+      const started = await window.lplay.startMagnetDownload({
+        jobId,
+        magnetUri: source,
+        downloadDir: magnetDownloadDir
+      });
+      setMagnetDownload(started);
+      if (started.downloadDir) {
+        setMagnetDownloadDir(started.downloadDir);
+      }
+    } catch (error) {
+      setMagnetDownload((current) =>
+        current?.jobId === jobId
+          ? {
+              ...current,
+              status: "error",
+              message: error instanceof Error ? error.message : "磁力下载启动失败"
+            }
+          : current
+      );
+    }
+  }
+
+  async function cancelMagnetDownload() {
+    if (!magnetDownload || !["resolving", "downloading"].includes(magnetDownload.status)) {
+      return;
+    }
+
+    await window.lplay.cancelMagnetDownload(magnetDownload.jobId);
+    setMagnetDownload((current) =>
+      current
+        ? {
+            ...current,
+            status: "cancelled",
+            message: "已取消"
+          }
+        : current
+    );
+  }
+
   const activeDuration = activeState?.duration || activeMedia?.metadata?.duration || 0;
   const canDownload = Boolean(m3u8Source.trim() && m3u8Output.trim() && download?.status !== "running");
+  const magnetBusy = magnetDownload?.status === "resolving" || magnetDownload?.status === "downloading";
+  const canStartMagnetDownload = isMagnetLink(magnetUri) && !magnetBusy;
   const latestConversion = Object.values(conversionJobs).slice(-3).reverse();
   const videoCountText = tagFilter ? `${visibleMedia.length}/${media.length}` : `${media.length}`;
 
@@ -1412,6 +1521,90 @@ export default function App() {
                       {download.speed ? ` · ${download.speed}` : ""}
                     </span>
                   </div>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panelTitle">
+              <Magnet size={18} />
+              <h2>磁力下载</h2>
+            </div>
+
+            <div className="downloadForm">
+              <label>
+                磁力链接
+                <textarea
+                  className="magnetInput"
+                  value={magnetUri}
+                  onChange={(event) => setMagnetUri(event.target.value)}
+                  placeholder="magnet:?xt=urn:btih:..."
+                />
+              </label>
+
+              <label>
+                默认下载文件夹
+                <div className="inputWithButton">
+                  <input value={magnetDownloadDir} readOnly placeholder="默认保存到系统下载目录 / Lplay" />
+                  <button type="button" onClick={chooseMagnetDownloadDir} title="预设下载文件夹">
+                    <FolderOpen size={16} />
+                  </button>
+                </div>
+              </label>
+
+              <div className="buttonCluster">
+                <button className="primaryButton" type="button" onClick={startMagnetDownload} disabled={!canStartMagnetDownload}>
+                  <Download size={17} />
+                  下载
+                </button>
+                <button className="iconButton" type="button" onClick={cancelMagnetDownload} disabled={!magnetBusy} title="取消下载">
+                  <X size={17} />
+                </button>
+                <button
+                  className="iconButton"
+                  type="button"
+                  onClick={() => magnetDownloadDir && window.lplay.revealPath(magnetDownloadDir)}
+                  disabled={!magnetDownloadDir}
+                  title="打开下载文件夹"
+                >
+                  <FolderOpen size={17} />
+                </button>
+              </div>
+
+              {magnetDownload && (
+                <div className={`downloadStatus ${magnetDownload.status}`}>
+                  <div className="progressBar">
+                    <span style={{ width: `${magnetDownload.percent ?? (magnetBusy ? 12 : 0)}%` }} />
+                  </div>
+                  <div className="downloadMeta">
+                    <span>{magnetDownload.name || magnetDownload.message || magnetDownload.status}</span>
+                    <span>
+                      {magnetDownload.percent !== undefined ? `${Math.round(magnetDownload.percent)}%` : magnetDownload.status}
+                    </span>
+                  </div>
+                  <div className="downloadMeta">
+                    <span>
+                      {formatBytes(magnetDownload.downloaded)} / {formatBytes(magnetDownload.total)}
+                    </span>
+                    <span>
+                      {formatBytes(magnetDownload.downloadSpeed)}/s · {magnetDownload.peers || 0} peers
+                    </span>
+                  </div>
+                  {magnetDownload.message && <p className="downloadMessage">{magnetDownload.message}</p>}
+                  {magnetDownload.files && magnetDownload.files.length > 0 && (
+                    <div className="magnetFileList">
+                      {magnetDownload.files.slice(0, 5).map((file) => (
+                        <div className="magnetFileItem" key={file.path}>
+                          <span>{file.name}</span>
+                          <small>
+                            {Math.round(file.progress)}% · {formatBytes(file.downloaded)} / {formatBytes(file.length)}
+                          </small>
+                        </div>
+                      ))}
+                      {magnetDownload.files.length > 5 && <small className="mutedText">还有 {magnetDownload.files.length - 5} 个文件</small>}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

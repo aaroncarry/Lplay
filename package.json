@@ -17,7 +17,8 @@
   "dependencies": {
     "lucide-react": "^1.16.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "webtorrent": "^3.0.16"
   },
   "devDependencies": {
     "@types/react": "^19.2.15",

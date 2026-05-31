@@ -72,3 +72,35 @@ export type M3u8DownloadOptions = {
   source: string;
   outputPath: string;
 };
+
+export type MagnetFileProgress = {
+  name: string;
+  path: string;
+  length: number;
+  downloaded: number;
+  progress: number;
+};
+
+export type MagnetProgress = {
+  jobId: string;
+  magnetUri: string;
+  downloadDir: string;
+  status: "resolving" | "downloading" | "done" | "error" | "cancelled";
+  name?: string;
+  infoHash?: string;
+  percent?: number;
+  downloaded?: number;
+  total?: number;
+  downloadSpeed?: number;
+  uploadSpeed?: number;
+  peers?: number;
+  message?: string;
+  files?: MagnetFileProgress[];
+  updatedAt?: number;
+};
+
+export type MagnetDownloadOptions = {
+  jobId: string;
+  magnetUri: string;
+  downloadDir?: string;
+};

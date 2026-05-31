@@ -16,6 +16,7 @@ Lplay 是一个桌面端多路视频播放器，基于 Electron、React、TypeSc
 - 支持播放历史记录，保存文件路径、上次播放进度和最后播放时间。
 - 右侧侧边栏可隐藏，适合专注观看多路视频。
 - 支持远程或本地 `.m3u8` 文件下载，并转存为 `.mp4`。
+- 支持通过磁力链接下载文件，并可预设默认下载文件夹。
 - 打包后的 Windows 版本内置 FFmpeg/FFprobe，不需要用户额外安装。
 
 ### 直接使用
@@ -27,6 +28,12 @@ release/Lplay-0.1.0-portable.exe
 ```
 
 双击即可运行。首次运行如果 Windows SmartScreen 提示安全警告，可选择“更多信息 -> 仍要运行”。这是因为当前应用没有代码签名证书。
+
+### 磁力链接下载
+
+在右侧侧边栏的“磁力下载”面板中粘贴 `magnet:?xt=urn:btih:...` 链接即可开始下载。
+
+点击“默认下载文件夹”旁的文件夹按钮可以预设保存目录。Lplay 会记住这个目录，后续磁力任务默认下载到这里；如果没有设置，默认保存到系统下载目录下的 `Lplay` 文件夹。
 
 ### 开发环境
 
@@ -187,6 +194,7 @@ npm run dist:installer  # 打包 Windows 安装包
 - Save playback history, including file path, last position, duration, and last played time.
 - Collapsible right sidebar for a cleaner viewing layout.
 - Download local or remote `.m3u8` playlists and remux them to `.mp4`.
+- Download files directly from magnet links with a configurable default download folder.
 - Windows packaged builds include FFmpeg/FFprobe.
 
 ### Use the Packaged App
@@ -198,6 +206,12 @@ release/Lplay-0.1.0-portable.exe
 ```
 
 If Windows SmartScreen shows a warning, choose "More info" and then "Run anyway". This happens because the app is not code-signed.
+
+### Magnet Downloads
+
+Paste a `magnet:?xt=urn:btih:...` link into the "Magnet Download" panel in the right sidebar to start downloading.
+
+Use the folder button next to the default download folder field to choose where magnet downloads should be saved. Lplay remembers the folder and uses it for future magnet downloads. If no folder is configured, files are saved under the system Downloads folder in a `Lplay` subfolder.
 
 ### Development
 
