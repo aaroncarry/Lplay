@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Lplay icon option D - stream download</title>
+  <desc id="desc">A rounded player icon with streaming arcs, download cue, and play symbol.</desc>
+  <defs>
+    <linearGradient id="bg" x1="168" y1="143" x2="872" y2="899" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0f2724"/>
+      <stop offset="0.54" stop-color="#10100e"/>
+      <stop offset="1" stop-color="#23190b"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="252" y1="236" x2="756" y2="788" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#60efe0"/>
+      <stop offset="1" stop-color="#207f78"/>
+    </linearGradient>
+    <linearGradient id="play" x1="438" y1="372" x2="662" y2="652" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffdc79"/>
+      <stop offset="1" stop-color="#ea9124"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="28" flood-color="#000000" flood-opacity="0.48"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" rx="222" fill="url(#bg)"/>
+  <circle cx="512" cy="512" r="265" fill="#12110f" stroke="url(#ring)" stroke-width="42" filter="url(#shadow)"/>
+  <path d="M335 331c-65 79-65 283 0 362M689 331c65 79 65 283 0 362" fill="none" stroke="#55ddce" stroke-width="36" stroke-linecap="round" opacity="0.72"/>
+  <path d="M412 386c-39 56-39 196 0 252M612 386c39 56 39 196 0 252" fill="none" stroke="#e9dac6" stroke-width="28" stroke-linecap="round" opacity="0.72"/>
+  <path d="M460 385c0-31 34-50 60-34l179 107c26 16 26 53 0 68L520 633c-26 16-60-3-60-34V385Z" fill="url(#play)"/>
+  <path d="M512 732V607M451 675l61 61 61-61" fill="none" stroke="#f4c65a" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Lplay icon option E - layered cards</title>
+  <desc id="desc">Layered video cards with a central play symbol.</desc>
+  <defs>
+    <linearGradient id="bg" x1="158" y1="126" x2="886" y2="913" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#202725"/>
+      <stop offset="0.56" stop-color="#11100e"/>
+      <stop offset="1" stop-color="#0c1f1d"/>
+    </linearGradient>
+    <linearGradient id="teal" x1="221" y1="258" x2="770" y2="710" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#65efe0"/>
+      <stop offset="1" stop-color="#248981"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="432" y1="392" x2="672" y2="646" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffdc75"/>
+      <stop offset="1" stop-color="#e98f22"/>
+    </linearGradient>
+    <filter id="shadow" x="-24%" y="-24%" width="148%" height="148%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="20" stdDeviation="26" flood-color="#000000" flood-opacity="0.5"/>
+    </filter>
+  </defs>
+  <rect width="1024" height="1024" rx="222" fill="url(#bg)"/>
+  <rect x="239" y="221" width="548" height="392" rx="70" fill="#171410" stroke="#5f4a2a" stroke-width="30" opacity="0.92" transform="rotate(-8 513 417)"/>
+  <rect x="233" y="316" width="558" height="402" rx="74" fill="#10110f" stroke="#246b66" stroke-width="34" opacity="0.96" transform="rotate(8 512 517)"/>
+  <rect x="190" y="286" width="644" height="452" rx="82" fill="#131210" stroke="url(#teal)" stroke-width="40" filter="url(#shadow)"/>
+  <path d="M264 653h496" stroke="#332d27" stroke-width="34" stroke-linecap="round"/>
+  <path d="M264 653h310" stroke="#f2bd50" stroke-width="34" stroke-linecap="round"/>
+  <path d="M455 407c0-31 34-50 60-34l179 107c26 16 26 53 0 68L515 655c-26 16-60-3-60-34V407Z" fill="url(#gold)"/>
+  <path d="M282 354h122M282 435h82" stroke="#e9dccb" stroke-width="27" stroke-linecap="round" opacity="0.92"/>
+</svg>

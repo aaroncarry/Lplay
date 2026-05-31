@@ -56,6 +56,15 @@ function resolveBinaryPath(name) {
   return candidates.find((candidate) => candidate === executableName || fileExists(candidate)) || executableName;
 }
 
+function resolveAppIconPath() {
+  const candidates = [
+    path.join(process.resourcesPath || "", "icon.ico"),
+    path.join(__dirname, "..", "build-resources", "icon.ico")
+  ];
+
+  return candidates.find((candidate) => fileExists(candidate));
+}
+
 function mediaContentType(filePath) {
   switch (path.extname(filePath).toLowerCase()) {
     case ".mp4":
@@ -208,6 +217,7 @@ function createWindow() {
     minHeight: 720,
     backgroundColor: "#11100f",
     title: "Lplay",
+    icon: resolveAppIconPath(),
     autoHideMenuBar: true,
     titleBarStyle: "hidden",
     titleBarOverlay: {

@@ -52,10 +52,15 @@
           "ffmpeg.exe",
           "ffprobe.exe"
         ]
+      },
+      {
+        "from": "build-resources/icon.ico",
+        "to": "icon.ico"
       }
     ],
     "asar": true,
     "win": {
+      "icon": "build-resources/icon.ico",
       "signAndEditExecutable": false,
       "target": [
         {
