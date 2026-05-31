@@ -24,7 +24,7 @@ Lplay 是一个桌面端多路视频播放器，基于 Electron、React、TypeSc
 如果你只想使用应用，请下载或运行打包后的便携版：
 
 ```text
-release/Lplay-0.1.0-portable.exe
+release/Lplay-0.2.0-portable.exe
 ```
 
 双击即可运行。首次运行如果 Windows SmartScreen 提示安全警告，可选择“更多信息 -> 仍要运行”。这是因为当前应用没有代码签名证书。
@@ -98,13 +98,13 @@ release/
 便携版文件名：
 
 ```text
-release/Lplay-0.1.0-portable.exe
+release/Lplay-0.2.0-portable.exe
 ```
 
 安装包文件名：
 
 ```text
-release/Lplay-0.1.0-setup.exe
+release/Lplay-0.2.0-setup.exe
 ```
 
 ### FFmpeg 打包说明
@@ -202,7 +202,7 @@ npm run dist:installer  # 打包 Windows 安装包
 Run the portable executable:
 
 ```text
-release/Lplay-0.1.0-portable.exe
+release/Lplay-0.2.0-portable.exe
 ```
 
 If Windows SmartScreen shows a warning, choose "More info" and then "Run anyway". This happens because the app is not code-signed.
@@ -274,13 +274,13 @@ release/
 Portable executable:
 
 ```text
-release/Lplay-0.1.0-portable.exe
+release/Lplay-0.2.0-portable.exe
 ```
 
 Installer:
 
 ```text
-release/Lplay-0.1.0-setup.exe
+release/Lplay-0.2.0-setup.exe
 ```
 
 ### FFmpeg Bundling
