@@ -33,6 +33,7 @@ const KNOWN_VIDEO_EXTENSIONS = new Set([
   ".vob",
   ".m3u8"
 ]);
+const FOLDER_IMPORT_LIMIT = 5000;
 
 const runningM3u8Jobs = new Map();
 const runningMagnetJobs = new Map();
@@ -284,6 +285,139 @@ function fileExists(filePath) {
   }
 }
 
+function pathKey(filePath) {
+  const normalized = path.normalize(filePath);
+  return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+}
+
+function stripM3u8QueryAndHash(uri) {
+  return String(uri || "").trim().split(/[?#]/)[0].trim();
+}
+
+function resolveLocalPlaylistUri(playlistPath, uri) {
+  const cleanUri = stripM3u8QueryAndHash(uri).replace(/^["']|["']$/g, "");
+  if (!cleanUri || cleanUri.startsWith("//")) {
+    return "";
+  }
+
+  if (/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(cleanUri) && !/^[a-zA-Z]:[\\/]/.test(cleanUri)) {
+    return "";
+  }
+
+  let decodedUri = cleanUri;
+  try {
+    decodedUri = decodeURIComponent(cleanUri);
+  } catch {
+    // Keep the original URI when it contains literal percent characters.
+  }
+
+  return path.resolve(path.dirname(playlistPath), decodedUri);
+}
+
+function parseM3u8LocalReferences(playlistPath, contents) {
+  const references = [];
+
+  for (const rawLine of contents.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) {
+      continue;
+    }
+
+    if (line.startsWith("#")) {
+      for (const match of line.matchAll(/\bURI=(?:"([^"]+)"|([^,\s]+))/gi)) {
+        const resolved = resolveLocalPlaylistUri(playlistPath, match[1] || match[2]);
+        if (resolved) {
+          references.push(resolved);
+        }
+      }
+      continue;
+    }
+
+    const resolved = resolveLocalPlaylistUri(playlistPath, line);
+    if (resolved) {
+      references.push(resolved);
+    }
+  }
+
+  return references;
+}
+
+async function collectM3u8SegmentPaths(rootDir) {
+  const segmentPaths = new Set();
+  const playlists = [];
+  const stack = [rootDir];
+
+  while (stack.length > 0) {
+    const currentDir = stack.pop();
+    let entries = [];
+    try {
+      entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+      } else if (entry.isFile() && path.extname(entry.name).toLowerCase() === ".m3u8") {
+        playlists.push(entryPath);
+      }
+    }
+  }
+
+  for (const playlistPath of playlists) {
+    try {
+      const contents = await fs.promises.readFile(playlistPath, "utf8");
+      for (const referencedPath of parseM3u8LocalReferences(playlistPath, contents)) {
+        segmentPaths.add(pathKey(referencedPath));
+      }
+    } catch {
+      // Broken playlists should not block folder import.
+    }
+  }
+
+  return segmentPaths;
+}
+
+async function collectVideoFiles(rootDir, limit = FOLDER_IMPORT_LIMIT) {
+  const playlistSegmentPaths = await collectM3u8SegmentPaths(rootDir);
+  const results = [];
+  const stack = [rootDir];
+
+  while (stack.length > 0 && results.length < limit) {
+    const currentDir = stack.pop();
+    let entries = [];
+    try {
+      entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const entryPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+        continue;
+      }
+
+      const extension = path.extname(entry.name).toLowerCase();
+      if (
+        entry.isFile() &&
+        KNOWN_VIDEO_EXTENSIONS.has(extension) &&
+        (extension === ".m3u8" || !playlistSegmentPaths.has(pathKey(entryPath)))
+      ) {
+        results.push(entryPath);
+        if (results.length >= limit) {
+          break;
+        }
+      }
+    }
+  }
+
+  return results.sort((left, right) => left.localeCompare(right, "zh-CN"));
+}
+
 function safeImportedFileName(fileName) {
   const extension = path.extname(fileName).toLowerCase().replace(/[^a-z0-9.]/g, "");
   const baseName = safeBaseName(fileName) || "dropped-video";
@@ -316,6 +450,22 @@ async function saveSettings(patch) {
 
 function defaultMagnetDownloadDir() {
   return path.join(app.getPath("downloads"), "Lplay");
+}
+
+function defaultConversionCacheDir() {
+  return path.join(app.getPath("userData"), "converted");
+}
+
+function getConversionCacheDir() {
+  const settings = loadSettings();
+  return settings.conversionCacheDir || defaultConversionCacheDir();
+}
+
+async function setConversionCacheDir(cacheDir) {
+  const resolved = path.resolve(String(cacheDir || "").trim() || defaultConversionCacheDir());
+  await fs.promises.mkdir(resolved, { recursive: true });
+  await saveSettings({ conversionCacheDir: resolved });
+  return resolved;
 }
 
 function getMagnetDownloadDir() {
@@ -606,7 +756,7 @@ async function convertToMp4(sender, filePath, jobId) {
     .update(`${filePath}:${stat.mtimeMs}:${stat.size}`)
     .digest("hex")
     .slice(0, 16);
-  const outputDir = path.join(app.getPath("userData"), "converted");
+  const outputDir = await setConversionCacheDir(getConversionCacheDir());
   await fs.promises.mkdir(outputDir, { recursive: true });
 
   const outputPath = path.join(outputDir, `${safeBaseName(filePath)}-${hash}.mp4`);
@@ -717,7 +867,7 @@ async function convertToMp4(sender, filePath, jobId) {
   return { outputPath, cached: false };
 }
 
-async function prepareOneMedia(sender, filePath) {
+async function prepareOneMedia(sender, filePath, options = {}) {
   const normalizedPath = normalizePossibleFileUrl(filePath);
   const stat = await fs.promises.stat(normalizedPath);
   if (!stat.isFile()) {
@@ -741,6 +891,19 @@ async function prepareOneMedia(sender, filePath) {
       originalExtension: extension.replace(".", ""),
       converted: false,
       cached: false,
+      metadata
+    };
+  }
+
+  if (!options.allowConversion) {
+    return {
+      needsConversion: true,
+      filePath: normalizedPath,
+      fileName: path.basename(normalizedPath),
+      extension: extension.replace(".", ""),
+      reason: DIRECT_PLAYABLE_EXTENSIONS.has(extension)
+        ? "这个 MP4/MOV 文件的内部编码当前无法直接播放，需要转为兼容 MP4。"
+        : "这个格式需要转为兼容 MP4 后播放。",
       metadata
     };
   }
@@ -790,7 +953,7 @@ async function forceCompatibleMedia(sender, filePath) {
     fileName: path.basename(normalizedPath),
     stage: "queued",
     percent: 0,
-    message: "自动修复播放兼容性"
+    message: "等待用户确认后的兼容转码"
   });
 
   const conversion = await convertToMp4(sender, normalizedPath, jobId);
@@ -825,17 +988,39 @@ ipcMain.handle("media:pick-files", async () => {
   return result.canceled ? [] : result.filePaths;
 });
 
-ipcMain.handle("media:prepare-files", async (event, filePaths) => {
+ipcMain.handle("media:pick-folder-files", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "选择视频文件夹",
+    properties: ["openDirectory"]
+  });
+
+  if (result.canceled || !result.filePaths[0]) {
+    return [];
+  }
+
+  return collectVideoFiles(result.filePaths[0]);
+});
+
+ipcMain.handle("media:prepare-files", async (event, payload) => {
+  const filePaths = Array.isArray(payload) ? payload : payload?.filePaths;
+  const allowConversion = !Array.isArray(payload) && Boolean(payload?.allowConversion);
+
   if (!Array.isArray(filePaths)) {
     throw new Error("filePaths must be an array");
   }
 
   const results = [];
+  const conversions = [];
   const errors = [];
 
   for (const filePath of filePaths) {
     try {
-      results.push(await prepareOneMedia(event.sender, filePath));
+      const prepared = await prepareOneMedia(event.sender, filePath, { allowConversion });
+      if (prepared?.needsConversion) {
+        conversions.push(prepared);
+      } else {
+        results.push(prepared);
+      }
     } catch (error) {
       errors.push({
         filePath: String(filePath || ""),
@@ -844,11 +1029,29 @@ ipcMain.handle("media:prepare-files", async (event, filePaths) => {
     }
   }
 
-  return { results, errors };
+  return { results, conversions, errors };
 });
 
 ipcMain.handle("media:make-compatible", async (event, filePath) => {
   return forceCompatibleMedia(event.sender, filePath);
+});
+
+ipcMain.handle("conversion:get-cache-dir", async () => {
+  return setConversionCacheDir(getConversionCacheDir());
+});
+
+ipcMain.handle("conversion:choose-cache-dir", async () => {
+  const result = await dialog.showOpenDialog({
+    title: "选择转码缓存目录",
+    defaultPath: getConversionCacheDir(),
+    properties: ["openDirectory", "createDirectory"]
+  });
+
+  if (result.canceled || !result.filePaths[0]) {
+    return "";
+  }
+
+  return setConversionCacheDir(result.filePaths[0]);
 });
 
 ipcMain.handle("media:drop-import-start", async (_event, fileName) => {

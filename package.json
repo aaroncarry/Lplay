@@ -1,6 +1,6 @@
 {
   "name": "lplay",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "author": "Lplay",
   "description": "A desktop multi-screen video player with highlights and M3U8 to MP4 conversion.",

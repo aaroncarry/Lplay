@@ -14,8 +14,11 @@ declare global {
   interface Window {
     lplay: {
       pickVideoFiles: () => Promise<string[]>;
-      prepareMediaFiles: (filePaths: string[]) => Promise<PrepareMediaResponse>;
+      pickVideoFolderFiles: () => Promise<string[]>;
+      prepareMediaFiles: (filePaths: string[], options?: { allowConversion?: boolean }) => Promise<PrepareMediaResponse>;
       makeMediaCompatible: (filePath: string) => Promise<PreparedMedia>;
+      getConversionCacheDir: () => Promise<string>;
+      chooseConversionCacheDir: () => Promise<string>;
       getDroppedFilePaths: (files: File[]) => string[];
       startDroppedFileImport: (fileName: string) => Promise<{ importId: string }>;
       appendDroppedFileChunk: (importId: string, chunk: ArrayBuffer) => Promise<boolean>;

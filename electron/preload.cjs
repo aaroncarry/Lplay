@@ -20,8 +20,11 @@ function getDroppedFilePaths(files) {
 
 contextBridge.exposeInMainWorld("lplay", {
   pickVideoFiles: () => ipcRenderer.invoke("media:pick-files"),
-  prepareMediaFiles: (filePaths) => ipcRenderer.invoke("media:prepare-files", filePaths),
+  pickVideoFolderFiles: () => ipcRenderer.invoke("media:pick-folder-files"),
+  prepareMediaFiles: (filePaths, options) => ipcRenderer.invoke("media:prepare-files", { filePaths, ...options }),
   makeMediaCompatible: (filePath) => ipcRenderer.invoke("media:make-compatible", filePath),
+  getConversionCacheDir: () => ipcRenderer.invoke("conversion:get-cache-dir"),
+  chooseConversionCacheDir: () => ipcRenderer.invoke("conversion:choose-cache-dir"),
   getDroppedFilePaths: (files) => getDroppedFilePaths(files),
   startDroppedFileImport: (fileName) => ipcRenderer.invoke("media:drop-import-start", fileName),
   appendDroppedFileChunk: (importId, chunk) => ipcRenderer.invoke("media:drop-import-append", { importId, chunk }),

@@ -24,10 +24,19 @@ export type PreparedMedia = {
 
 export type PrepareMediaResponse = {
   results: PreparedMedia[];
+  conversions: ConversionCandidate[];
   errors: Array<{
     filePath: string;
     message: string;
   }>;
+};
+
+export type ConversionCandidate = {
+  filePath: string;
+  fileName: string;
+  extension: string;
+  reason: string;
+  metadata?: MediaMetadata;
 };
 
 export type Highlight = {
