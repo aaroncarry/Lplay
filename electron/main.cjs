@@ -51,8 +51,68 @@ let webTorrentConstructorPromise;
 let magnetClientPromise;
 let mediaServerPort = 0;
 let mediaServer;
+let mainWindow;
+let forceExitTimer;
+let isQuitting = false;
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
+function redactPrivatePaths(value) {
+  return String(value || "")
+    .replace(/file:\/\/\/[^\s)"']+/gi, "[file-url]")
+    .replace(/[a-zA-Z]:\\[^\s)"']+/g, "[path]");
+}
+
+function crashLogPath() {
+  try {
+    return path.join(app.getPath("userData"), "logs", "main.log");
+  } catch {
+    return path.join(process.env.APPDATA || process.cwd(), "Lplay", "logs", "main.log");
+  }
+}
+
+function writeLog(event, details = {}) {
+  try {
+    const filePath = crashLogPath();
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
+    if (fileExists(filePath) && fs.statSync(filePath).size > 1024 * 1024) {
+      fs.renameSync(filePath, path.join(path.dirname(filePath), `main.${Date.now()}.log`));
+    }
+
+    fs.appendFileSync(
+      filePath,
+      `${JSON.stringify({
+        time: new Date().toISOString(),
+        event,
+        ...details
+      })}\n`,
+      "utf8"
+    );
+  } catch {
+    // Logging must never interfere with playback or startup.
+  }
+}
+
+function formatProcessError(error) {
+  if (!error) {
+    return {};
+  }
+
+  return {
+    name: redactPrivatePaths(error.name || "Error"),
+    message: redactPrivatePaths(error.message || String(error)),
+    stack: redactPrivatePaths(error.stack || "")
+  };
+}
+
+process.on("uncaughtException", (error) => {
+  writeLog("uncaughtException", formatProcessError(error));
+});
+
+process.on("unhandledRejection", (reason) => {
+  writeLog("unhandledRejection", formatProcessError(reason instanceof Error ? reason : new Error(String(reason))));
+});
 
 function resolveBinaryPath(name) {
   const executableName = process.platform === "win32" ? `${name}.exe` : name;
@@ -242,6 +302,43 @@ function createWindow() {
     }
   });
 
+  mainWindow = window;
+  writeLog("window-created", {
+    pid: process.pid,
+    dev: Boolean(process.env.VITE_DEV_SERVER_URL)
+  });
+
+  window.on("closed", () => {
+    writeLog("window-closed");
+    if (mainWindow === window) {
+      mainWindow = undefined;
+    }
+  });
+
+  window.on("unresponsive", () => {
+    writeLog("window-unresponsive");
+  });
+
+  window.on("responsive", () => {
+    writeLog("window-responsive");
+  });
+
+  window.webContents.on("render-process-gone", (_event, details) => {
+    writeLog("render-process-gone", {
+      reason: details.reason,
+      exitCode: details.exitCode
+    });
+  });
+
+  window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    writeLog("did-fail-load", {
+      errorCode,
+      errorDescription: redactPrivatePaths(errorDescription),
+      isMainFrame,
+      urlKind: validatedURL?.startsWith("file:") ? "file" : validatedURL?.startsWith("http://127.0.0.1") ? "local-http" : "other"
+    });
+  });
+
   if (process.env.VITE_DEV_SERVER_URL) {
     window.loadURL(process.env.VITE_DEV_SERVER_URL);
     window.webContents.openDevTools({ mode: "detach" });
@@ -250,26 +347,108 @@ function createWindow() {
   }
 }
 
-app.whenReady().then(async () => {
-  Menu.setApplicationMenu(null);
-  await startMediaServer();
-  createWindow();
-
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+function cleanupRuntimeHandles() {
+  for (const child of runningM3u8Jobs.values()) {
+    try {
+      child.kill("SIGTERM");
+    } catch {
+      // The child may have already exited.
     }
+  }
+  runningM3u8Jobs.clear();
+  mediaFiles.clear();
+
+  if (mediaServer) {
+    try {
+      mediaServer.closeAllConnections?.();
+      mediaServer.close();
+    } catch {
+      // The server can already be closed during shutdown.
+    } finally {
+      mediaServer = undefined;
+      mediaServerPort = 0;
+    }
+  }
+
+  void destroyMagnetClient();
+}
+
+function focusOrCreateWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.show();
+    mainWindow.focus();
+    return;
+  }
+
+  if (app.isReady()) {
+    createWindow();
+  }
+}
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) {
+  writeLog("second-instance-exit", { pid: process.pid });
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    writeLog("second-instance");
+    focusOrCreateWindow();
   });
-});
+
+  app.on("child-process-gone", (_event, details) => {
+    writeLog("child-process-gone", {
+      type: details.type,
+      reason: details.reason,
+      exitCode: details.exitCode,
+      serviceName: details.serviceName || ""
+    });
+  });
+
+  app.whenReady().then(async () => {
+    writeLog("app-ready", { pid: process.pid });
+    Menu.setApplicationMenu(null);
+    await startMediaServer();
+    createWindow();
+
+    app.on("activate", () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+      }
+    });
+  });
+}
 
 app.on("window-all-closed", () => {
-  if (mediaServer) {
-    mediaServer.close();
-  }
-  void destroyMagnetClient();
+  writeLog("window-all-closed");
+  cleanupRuntimeHandles();
   if (process.platform !== "darwin") {
     app.quit();
   }
+});
+
+app.on("before-quit", () => {
+  isQuitting = true;
+  writeLog("before-quit");
+  cleanupRuntimeHandles();
+  if (!forceExitTimer) {
+    forceExitTimer = setTimeout(() => {
+      writeLog("force-exit-after-quit-timeout");
+      app.exit(0);
+    }, 3000);
+    forceExitTimer.unref?.();
+  }
+});
+
+app.on("will-quit", () => {
+  writeLog("will-quit");
+});
+
+app.on("quit", (_event, exitCode) => {
+  writeLog("quit", { exitCode, isQuitting });
 });
 
 function sendToRenderer(sender, channel, payload) {

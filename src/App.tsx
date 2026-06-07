@@ -1540,7 +1540,8 @@ export default function App() {
   function upsertHistory(item: PreparedMedia, patch: Partial<PlaybackHistoryItem> = {}) {
     const now = Date.now();
     setHistory((current) => {
-      const existing = current.find((entry) => entry.sourcePath === item.sourcePath);
+      const existingIndex = current.findIndex((entry) => entry.sourcePath === item.sourcePath);
+      const existing = existingIndex >= 0 ? current[existingIndex] : undefined;
       const nextItem: PlaybackHistoryItem = {
         sourcePath: item.sourcePath,
         displayName: item.displayName,
@@ -1552,9 +1553,13 @@ export default function App() {
         ...patch
       };
 
-      return [nextItem, ...current.filter((entry) => entry.sourcePath !== item.sourcePath)]
-        .sort((left, right) => right.lastPlayedAt - left.lastPlayedAt)
-        .slice(0, MAX_HISTORY_ITEMS);
+      if (existingIndex >= 0) {
+        const next = [...current];
+        next[existingIndex] = nextItem;
+        return next.slice(0, MAX_HISTORY_ITEMS);
+      }
+
+      return [nextItem, ...current].slice(0, MAX_HISTORY_ITEMS);
     });
   }
 
