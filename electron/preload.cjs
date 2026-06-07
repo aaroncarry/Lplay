@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld("lplay", {
   pickVideoFolderFiles: () => ipcRenderer.invoke("media:pick-folder-files"),
   prepareMediaFiles: (filePaths, options) => ipcRenderer.invoke("media:prepare-files", { filePaths, ...options }),
   makeMediaCompatible: (filePath) => ipcRenderer.invoke("media:make-compatible", filePath),
+  loadLibraryState: () => ipcRenderer.invoke("library:load-state"),
+  saveLibraryState: (payload) => ipcRenderer.invoke("library:save-state", payload),
   getConversionCacheDir: () => ipcRenderer.invoke("conversion:get-cache-dir"),
   chooseConversionCacheDir: () => ipcRenderer.invoke("conversion:choose-cache-dir"),
   getDroppedFilePaths: (files) => getDroppedFilePaths(files),

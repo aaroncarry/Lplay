@@ -17,6 +17,8 @@ declare global {
       pickVideoFolderFiles: () => Promise<string[]>;
       prepareMediaFiles: (filePaths: string[], options?: { allowConversion?: boolean }) => Promise<PrepareMediaResponse>;
       makeMediaCompatible: (filePath: string) => Promise<PreparedMedia>;
+      loadLibraryState: () => Promise<Record<string, unknown>>;
+      saveLibraryState: (payload: Record<string, unknown>) => Promise<{ historyCount: number; metadataCount: number }>;
       getConversionCacheDir: () => Promise<string>;
       chooseConversionCacheDir: () => Promise<string>;
       getDroppedFilePaths: (files: File[]) => string[];

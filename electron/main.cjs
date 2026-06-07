@@ -34,6 +34,14 @@ const KNOWN_VIDEO_EXTENSIONS = new Set([
   ".m3u8"
 ]);
 const FOLDER_IMPORT_LIMIT = 5000;
+const LIBRARY_LOCAL_STORAGE_KEYS = {
+  highlights: ["lplay.highlights.v1", "xplay.highlights.v1"],
+  history: ["lplay.history.v1", "xplay.history.v1"],
+  snapshots: ["lplay.snapshots.v1", "xplay.snapshots.v1"],
+  videoMetadata: ["lplay.videoMetadata.v1", "xplay.videoMetadata.v1"],
+  uiState: ["lplay.ui.v1", "xplay.ui.v1"],
+  magnetRecords: ["lplay.magnetRecords.v1", "xplay.magnetRecords.v1"]
+};
 
 const runningM3u8Jobs = new Map();
 const runningMagnetJobs = new Map();
@@ -428,6 +436,192 @@ function settingsPath() {
   return path.join(app.getPath("userData"), "settings.json");
 }
 
+function libraryStatePath() {
+  return path.join(app.getPath("userData"), "library-state.json");
+}
+
+function parseJsonArrayLength(value) {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function historyLengthFromState(value) {
+  return parseJsonArrayLength(value?.history);
+}
+
+function stateLibraryCount(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return 0;
+  }
+
+  return (
+    parseJsonArrayLength(value.history) +
+    parseJsonArrayLength(value.snapshots) +
+    parseJsonArrayLength(value.magnetRecords) +
+    (value.highlights && typeof value.highlights === "object" && !Array.isArray(value.highlights) ? Object.keys(value.highlights).length : 0) +
+    (value.videoMetadata && typeof value.videoMetadata === "object" && !Array.isArray(value.videoMetadata) ? Object.keys(value.videoMetadata).length : 0)
+  );
+}
+
+function jsonEntryCount(value) {
+  if (Array.isArray(value)) {
+    return value.length;
+  }
+
+  if (value && typeof value === "object") {
+    return Object.keys(value).length;
+  }
+
+  return 0;
+}
+
+function findJsonStart(text, startIndex) {
+  const objectIndex = text.indexOf("{", startIndex);
+  const arrayIndex = text.indexOf("[", startIndex);
+
+  if (objectIndex === -1) {
+    return arrayIndex;
+  }
+
+  if (arrayIndex === -1) {
+    return objectIndex;
+  }
+
+  return Math.min(objectIndex, arrayIndex);
+}
+
+function extractJsonAt(text, startIndex) {
+  const start = findJsonStart(text, startIndex);
+  if (start === -1) {
+    return null;
+  }
+
+  const opening = text[start];
+  const closing = opening === "{" ? "}" : "]";
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === opening) {
+      depth += 1;
+    } else if (char === closing) {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, index + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function parseStorageValueCandidates(buffer, storageKey) {
+  const candidates = [];
+  for (const encoding of ["utf8", "utf16le"]) {
+    const text = buffer.toString(encoding);
+    let index = text.indexOf(storageKey);
+    while (index !== -1) {
+      const jsonText = extractJsonAt(text, index + storageKey.length);
+      if (jsonText) {
+        try {
+          candidates.push(JSON.parse(jsonText));
+        } catch {
+          // Binary LevelDB files can contain stale or partial values; ignore malformed slices.
+        }
+      }
+      index = text.indexOf(storageKey, index + storageKey.length);
+    }
+  }
+
+  return candidates;
+}
+
+async function listLevelDbFiles(directory) {
+  try {
+    const entries = await fs.promises.readdir(directory, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isFile() && [".ldb", ".log"].includes(path.extname(entry.name).toLowerCase()))
+      .map((entry) => path.join(directory, entry.name));
+  } catch {
+    return [];
+  }
+}
+
+async function findLegacyLocalStorageState() {
+  const appData = app.getPath("appData");
+  const directories = [
+    path.join(app.getPath("userData"), "Local Storage", "leveldb"),
+    path.join(appData, "Lplay", "Local Storage", "leveldb"),
+    path.join(appData, "lplay", "Local Storage", "leveldb"),
+    path.join(appData, "Xplay", "Local Storage", "leveldb"),
+    path.join(appData, "xplay", "Local Storage", "leveldb")
+  ];
+  const uniqueDirectories = [...new Set(directories)];
+  const bestValues = {};
+
+  for (const directory of uniqueDirectories) {
+    const files = await listLevelDbFiles(directory);
+    for (const file of files) {
+      let buffer;
+      try {
+        buffer = await fs.promises.readFile(file);
+      } catch {
+        continue;
+      }
+
+      for (const [stateKey, storageKeys] of Object.entries(LIBRARY_LOCAL_STORAGE_KEYS)) {
+        for (const storageKey of storageKeys) {
+          for (const value of parseStorageValueCandidates(buffer, storageKey)) {
+            if (jsonEntryCount(value) > jsonEntryCount(bestValues[stateKey])) {
+              bestValues[stateKey] = value;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return stateLibraryCount(bestValues) > 0 ? bestValues : {};
+}
+
+function chooseLargerStateValue(current, incoming) {
+  return jsonEntryCount(incoming) > jsonEntryCount(current) ? incoming : current;
+}
+
+function mergeLoadedLibraryState(stable, legacy) {
+  if (stateLibraryCount(legacy) === 0) {
+    return stable;
+  }
+
+  return {
+    ...stable,
+    highlights: chooseLargerStateValue(stable.highlights, legacy.highlights),
+    history: chooseLargerStateValue(stable.history, legacy.history),
+    snapshots: chooseLargerStateValue(stable.snapshots, legacy.snapshots),
+    videoMetadata: chooseLargerStateValue(stable.videoMetadata, legacy.videoMetadata),
+    uiState: stable.uiState || legacy.uiState,
+    magnetRecords: chooseLargerStateValue(stable.magnetRecords, legacy.magnetRecords)
+  };
+}
+
 function loadSettings() {
   try {
     const raw = fs.readFileSync(settingsPath(), "utf8");
@@ -446,6 +640,60 @@ async function saveSettings(patch) {
   await fs.promises.mkdir(path.dirname(settingsPath()), { recursive: true });
   await fs.promises.writeFile(settingsPath(), JSON.stringify(next, null, 2), "utf8");
   return next;
+}
+
+async function loadLibraryState() {
+  let stable = {};
+  try {
+    const raw = await fs.promises.readFile(libraryStatePath(), "utf8");
+    const parsed = JSON.parse(raw);
+    stable = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    stable = {};
+  }
+
+  try {
+    return mergeLoadedLibraryState(stable, await findLegacyLocalStorageState());
+  } catch {
+    return stable;
+  }
+}
+
+async function saveLibraryState(payload) {
+  const next = payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+  const filePath = libraryStatePath();
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+
+  let existing;
+  let existingRaw = "";
+  try {
+    existingRaw = await fs.promises.readFile(filePath, "utf8");
+    existing = JSON.parse(existingRaw);
+    const existingLength = historyLengthFromState(existing);
+    const nextLength = historyLengthFromState(next);
+    if (stateLibraryCount(existing) > 0 && stateLibraryCount(next) === 0) {
+      return {
+        historyCount: existingLength,
+        metadataCount: existing.videoMetadata && typeof existing.videoMetadata === "object" ? Object.keys(existing.videoMetadata).length : 0,
+        skipped: true
+      };
+    }
+
+    if (existingLength >= 100 && existingLength - nextLength >= 50) {
+      const backupPath = path.join(path.dirname(filePath), `library-state.backup.${Date.now()}.json`);
+      await fs.promises.writeFile(backupPath, existingRaw, "utf8");
+    }
+  } catch {
+    // Missing or invalid existing state should not block saving the current state.
+  }
+
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  await fs.promises.writeFile(tempPath, JSON.stringify(next, null, 2), "utf8");
+  await fs.promises.rename(tempPath, filePath);
+  return {
+    historyCount: historyLengthFromState(next),
+    metadataCount: next.videoMetadata && typeof next.videoMetadata === "object" ? Object.keys(next.videoMetadata).length : 0
+  };
 }
 
 function defaultMagnetDownloadDir() {
@@ -1034,6 +1282,14 @@ ipcMain.handle("media:prepare-files", async (event, payload) => {
 
 ipcMain.handle("media:make-compatible", async (event, filePath) => {
   return forceCompatibleMedia(event.sender, filePath);
+});
+
+ipcMain.handle("library:load-state", async () => {
+  return loadLibraryState();
+});
+
+ipcMain.handle("library:save-state", async (_event, payload) => {
+  return saveLibraryState(payload);
 });
 
 ipcMain.handle("conversion:get-cache-dir", async () => {

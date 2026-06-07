@@ -127,6 +127,15 @@ type UiState = {
   minRatingFilter: number;
 };
 
+type PersistentLibraryState = {
+  highlights: HighlightLibrary;
+  history: PlaybackHistoryItem[];
+  snapshots: PlaybackSnapshot[];
+  videoMetadata: VideoMetadataLibrary;
+  uiState: UiState;
+  magnetRecords: MagnetRecord[];
+};
+
 const defaultUiState: UiState = {
   inspectorOpen: true,
   inspectorTab: "library",
@@ -181,6 +190,28 @@ function loadPlaybackHistory(): PlaybackHistoryItem[] {
   } catch {
     return [];
   }
+}
+
+function savePlaybackHistory(history: PlaybackHistoryItem[]) {
+  const next = history.slice(0, MAX_HISTORY_ITEMS);
+  const nextJson = JSON.stringify(next);
+
+  try {
+    const existingRaw = localStorage.getItem(HISTORY_STORAGE_KEY);
+    const existing = existingRaw ? JSON.parse(existingRaw) : [];
+    if (
+      existingRaw &&
+      Array.isArray(existing) &&
+      existing.length >= 100 &&
+      existing.length - next.length >= 50
+    ) {
+      localStorage.setItem(`${HISTORY_STORAGE_KEY}.backup.auto.${Date.now()}`, existingRaw);
+    }
+  } catch {
+    // A broken existing history should not block saving the current in-memory state.
+  }
+
+  localStorage.setItem(HISTORY_STORAGE_KEY, nextJson);
 }
 
 function normalizeSnapshot(value: unknown): PlaybackSnapshot | null {
@@ -299,11 +330,19 @@ function normalizeStoredRating(entry: Record<string, unknown>) {
     return 0;
   }
 
-  if (Number(entry.ratingScale) === VIDEO_RATING_MAX) {
+  const ratingScale = Number(entry.ratingScale);
+  if (ratingScale === VIDEO_RATING_MAX) {
     return normalizeRating(rating);
   }
 
-  return normalizeRating(rating * 2);
+  if (ratingScale === 5) {
+    return normalizeRating(rating * 2);
+  }
+
+  // Older 5-star data did not store ratingScale, but some preview builds already wrote
+  // 10-point ratings before ratingScale existed. Values above 5 are therefore already
+  // on the current scale and must not be doubled.
+  return rating > 5 ? normalizeRating(rating) : normalizeRating(rating * 2);
 }
 
 function normalizeTags(value: unknown) {
@@ -483,6 +522,320 @@ function loadUiState(): UiState {
   }
 }
 
+function normalizeHighlightLibraryValue(value: unknown): HighlightLibrary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.entries(value as Record<string, unknown>).reduce<HighlightLibrary>((library, [sourcePath, rawHighlights]) => {
+    if (!sourcePath || !Array.isArray(rawHighlights)) {
+      return library;
+    }
+
+    const list = rawHighlights
+      .map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          return null;
+        }
+
+        const entry = item as Record<string, unknown>;
+        const id = typeof entry.id === "string" ? entry.id : "";
+        const start = Number(entry.start);
+        const end = Number(entry.end);
+        const createdAt = Number(entry.createdAt);
+
+        if (!id || !Number.isFinite(start) || !Number.isFinite(end)) {
+          return null;
+        }
+
+        return {
+          id,
+          start: Math.max(0, start),
+          end: Math.max(0, end),
+          note: typeof entry.note === "string" ? entry.note : "",
+          createdAt: Number.isFinite(createdAt) ? createdAt : 0
+        };
+      })
+      .filter((item): item is Highlight => Boolean(item))
+      .sort((left, right) => left.start - right.start);
+
+    if (list.length > 0) {
+      library[sourcePath] = list;
+    }
+
+    return library;
+  }, {});
+}
+
+function normalizePlaybackHistoryItem(value: unknown): PlaybackHistoryItem | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const entry = value as Record<string, unknown>;
+  const sourcePath = typeof entry.sourcePath === "string" ? entry.sourcePath : "";
+  if (!sourcePath) {
+    return null;
+  }
+
+  const duration = Number(entry.duration);
+  const currentTime = Number(entry.currentTime);
+  const lastOpenedAt = Number(entry.lastOpenedAt);
+  const lastPlayedAt = Number(entry.lastPlayedAt);
+
+  return {
+    sourcePath,
+    displayName: typeof entry.displayName === "string" ? entry.displayName : baseNameFromPath(sourcePath),
+    originalExtension: typeof entry.originalExtension === "string" ? entry.originalExtension : extensionFromPath(sourcePath),
+    duration: Number.isFinite(duration) ? Math.max(0, duration) : 0,
+    currentTime: Number.isFinite(currentTime) ? Math.max(0, currentTime) : 0,
+    lastOpenedAt: Number.isFinite(lastOpenedAt) ? Math.max(0, lastOpenedAt) : 0,
+    lastPlayedAt: Number.isFinite(lastPlayedAt) ? Math.max(0, lastPlayedAt) : 0
+  };
+}
+
+function normalizePlaybackHistoryValue(value: unknown): PlaybackHistoryItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => normalizePlaybackHistoryItem(item))
+    .filter((item): item is PlaybackHistoryItem => Boolean(item))
+    .sort((left, right) => right.lastPlayedAt - left.lastPlayedAt)
+    .slice(0, MAX_HISTORY_ITEMS);
+}
+
+function normalizePlaybackSnapshotsValue(value: unknown): PlaybackSnapshot[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => normalizeSnapshot(item))
+    .filter((item): item is PlaybackSnapshot => Boolean(item))
+    .sort((left, right) => right.createdAt - left.createdAt)
+    .slice(0, MAX_PLAYBACK_SNAPSHOTS);
+}
+
+function normalizeVideoMetadataLibraryValue(value: unknown): VideoMetadataLibrary {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.entries(value as Record<string, unknown>).reduce<VideoMetadataLibrary>((library, [sourcePath, rawMetadata]) => {
+    if (!sourcePath || !rawMetadata || typeof rawMetadata !== "object" || Array.isArray(rawMetadata)) {
+      return library;
+    }
+
+    const entry = rawMetadata as Record<string, unknown>;
+    const updatedAt = Number(entry.updatedAt);
+    library[sourcePath] = {
+      rating: normalizeStoredRating(entry),
+      tags: normalizeTags(entry.tags),
+      ratingScale: VIDEO_RATING_MAX,
+      updatedAt: Number.isFinite(updatedAt) ? Math.max(0, updatedAt) : 0
+    };
+    return library;
+  }, {});
+}
+
+function normalizeUiStateValue(value: unknown): UiState {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return defaultUiState;
+  }
+
+  const parsed = value as Record<string, unknown>;
+  const minRatingFilter = normalizeRating(parsed.minRatingFilter);
+  return {
+    inspectorOpen: parsed.inspectorOpen !== false,
+    inspectorTab: isInspectorTab(parsed.inspectorTab) ? parsed.inspectorTab : defaultUiState.inspectorTab,
+    libraryTab: isLibraryTab(parsed.libraryTab) ? parsed.libraryTab : defaultUiState.libraryTab,
+    sortMode: isSortMode(parsed.sortMode) ? parsed.sortMode : defaultUiState.sortMode,
+    ratingFilterMode: isRatingFilterMode(parsed.ratingFilterMode)
+      ? parsed.ratingFilterMode
+      : minRatingFilter > 0
+        ? "at-least"
+        : defaultUiState.ratingFilterMode,
+    librarySearchQuery: typeof parsed.librarySearchQuery === "string" ? parsed.librarySearchQuery : defaultUiState.librarySearchQuery,
+    tagFilter: typeof parsed.tagFilter === "string" ? parsed.tagFilter : defaultUiState.tagFilter,
+    minRatingFilter
+  };
+}
+
+function normalizeMagnetRecordsValue(value: unknown): MagnetRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => normalizeMagnetRecord(item))
+    .filter((item): item is MagnetRecord => Boolean(item))
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, MAX_MAGNET_RECORDS);
+}
+
+function normalizePersistentLibraryState(value: unknown): PersistentLibraryState {
+  const entry = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+  return {
+    highlights: normalizeHighlightLibraryValue(entry.highlights),
+    history: normalizePlaybackHistoryValue(entry.history),
+    snapshots: normalizePlaybackSnapshotsValue(entry.snapshots),
+    videoMetadata: normalizeVideoMetadataLibraryValue(entry.videoMetadata),
+    uiState: normalizeUiStateValue(entry.uiState),
+    magnetRecords: normalizeMagnetRecordsValue(entry.magnetRecords)
+  };
+}
+
+function readLocalStorageJson(key: string): unknown {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readLocalPlaybackHistoryWithBackups(): PlaybackHistoryItem[] {
+  const current = normalizePlaybackHistoryValue(readLocalStorageJson(HISTORY_STORAGE_KEY));
+  if (current.length >= 100) {
+    return current;
+  }
+
+  const backupHistories: PlaybackHistoryItem[][] = [];
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (!key?.startsWith(`${HISTORY_STORAGE_KEY}.backup.`)) {
+        continue;
+      }
+
+      const backup = normalizePlaybackHistoryValue(readLocalStorageJson(key));
+      if (backup.length > current.length) {
+        backupHistories.push(backup);
+      }
+    }
+  } catch {
+    // Storage enumeration can fail in unusual browser states; the current record list remains usable.
+  }
+
+  return backupHistories.length > 0 ? mergeHistoryItems(current, ...backupHistories) : current;
+}
+
+function readLocalPersistentLibraryState(): PersistentLibraryState {
+  return {
+    highlights: normalizeHighlightLibraryValue(readLocalStorageJson(HIGHLIGHT_STORAGE_KEY)),
+    history: readLocalPlaybackHistoryWithBackups(),
+    snapshots: normalizePlaybackSnapshotsValue(readLocalStorageJson(SNAPSHOT_STORAGE_KEY)),
+    videoMetadata: normalizeVideoMetadataLibraryValue(readLocalStorageJson(VIDEO_METADATA_STORAGE_KEY)),
+    uiState: normalizeUiStateValue(readLocalStorageJson(UI_STORAGE_KEY)),
+    magnetRecords: normalizeMagnetRecordsValue(readLocalStorageJson(MAGNET_RECORD_STORAGE_KEY))
+  };
+}
+
+function mergeHistoryItems(...sources: PlaybackHistoryItem[][]): PlaybackHistoryItem[] {
+  const byPath = new Map<string, PlaybackHistoryItem>();
+
+  for (const item of sources.flat()) {
+    const existing = byPath.get(item.sourcePath);
+    const existingTouchedAt = Math.max(existing?.lastPlayedAt || 0, existing?.lastOpenedAt || 0);
+    const itemTouchedAt = Math.max(item.lastPlayedAt || 0, item.lastOpenedAt || 0);
+
+    if (!existing || itemTouchedAt >= existingTouchedAt) {
+      byPath.set(item.sourcePath, item);
+    }
+  }
+
+  return [...byPath.values()]
+    .sort((left, right) => Math.max(right.lastPlayedAt, right.lastOpenedAt) - Math.max(left.lastPlayedAt, left.lastOpenedAt))
+    .slice(0, MAX_HISTORY_ITEMS);
+}
+
+function mergeHighlightLibraries(...sources: HighlightLibrary[]): HighlightLibrary {
+  const merged: HighlightLibrary = {};
+
+  for (const source of sources) {
+    for (const [sourcePath, highlights] of Object.entries(source)) {
+      const byId = new Map((merged[sourcePath] || []).map((highlight) => [highlight.id, highlight]));
+      for (const highlight of highlights) {
+        byId.set(highlight.id, highlight);
+      }
+
+      merged[sourcePath] = [...byId.values()].sort((left, right) => left.start - right.start);
+    }
+  }
+
+  return merged;
+}
+
+function mergeSnapshots(...sources: PlaybackSnapshot[][]): PlaybackSnapshot[] {
+  const byId = new Map<string, PlaybackSnapshot>();
+
+  for (const snapshot of sources.flat()) {
+    const existing = byId.get(snapshot.id);
+    if (!existing || snapshot.createdAt >= existing.createdAt) {
+      byId.set(snapshot.id, snapshot);
+    }
+  }
+
+  return [...byId.values()]
+    .sort((left, right) => right.createdAt - left.createdAt)
+    .slice(0, MAX_PLAYBACK_SNAPSHOTS);
+}
+
+function mergeVideoMetadataLibraries(...sources: VideoMetadataLibrary[]): VideoMetadataLibrary {
+  const merged: VideoMetadataLibrary = {};
+
+  for (const source of sources) {
+    for (const [sourcePath, metadata] of Object.entries(source)) {
+      const existing = merged[sourcePath];
+      if (!existing) {
+        merged[sourcePath] = metadata;
+        continue;
+      }
+
+      const useIncomingRating = metadata.updatedAt >= existing.updatedAt;
+      merged[sourcePath] = {
+        rating: useIncomingRating ? metadata.rating : existing.rating,
+        tags: normalizeTags([...existing.tags, ...metadata.tags]),
+        ratingScale: VIDEO_RATING_MAX,
+        updatedAt: Math.max(existing.updatedAt, metadata.updatedAt)
+      };
+    }
+  }
+
+  return merged;
+}
+
+function mergePersistentLibraryState(stored: PersistentLibraryState, local: PersistentLibraryState): PersistentLibraryState {
+  const hasLocalLibraryData =
+    local.history.length > 0 ||
+    local.snapshots.length > 0 ||
+    Object.keys(local.highlights).length > 0 ||
+    Object.keys(local.videoMetadata).length > 0 ||
+    local.magnetRecords.length > 0;
+
+  return {
+    highlights: mergeHighlightLibraries(stored.highlights, local.highlights),
+    history: mergeHistoryItems(stored.history, local.history),
+    snapshots: mergeSnapshots(stored.snapshots, local.snapshots),
+    videoMetadata: mergeVideoMetadataLibraries(stored.videoMetadata, local.videoMetadata),
+    uiState: hasLocalLibraryData ? local.uiState : stored.uiState,
+    magnetRecords: normalizeMagnetRecordsValue([...stored.magnetRecords, ...local.magnetRecords])
+  };
+}
+
+function persistentLibraryDataCount(state: PersistentLibraryState) {
+  return (
+    state.history.length +
+    state.snapshots.length +
+    state.magnetRecords.length +
+    Object.keys(state.highlights).length +
+    Object.keys(state.videoMetadata).length
+  );
+}
+
 function formatTime(value?: number) {
   const total = Math.max(0, Number.isFinite(value || 0) ? Math.floor(value || 0) : 0);
   const hours = Math.floor(total / 3600);
@@ -643,10 +996,12 @@ export default function App() {
   const [magnetUri, setMagnetUri] = useState("");
   const [magnetDownloadDir, setMagnetDownloadDir] = useState("");
   const [magnetRecords, setMagnetRecords] = useState<MagnetRecord[]>(() => loadMagnetRecords());
+  const [stableStorageReady, setStableStorageReady] = useState(false);
   const videoRefs = useRef(new Map<string, HTMLVideoElement>());
   const decodeWatchers = useRef(new Map<string, number>());
   const pendingSeek = useRef(new Map<string, number>());
   const historyTouchTimes = useRef(new Map<string, number>());
+  const stableStorageHasSeenLibraryData = useRef(false);
 
   const allTags = useMemo(() => {
     const tags = new Set<string>();
@@ -737,11 +1092,95 @@ export default function App() {
   );
 
   useEffect(() => {
+    let cancelled = false;
+
+    void window.lplay
+      .loadLibraryState()
+      .then((storedState) => {
+        if (cancelled) {
+          return;
+        }
+
+        const merged = mergePersistentLibraryState(normalizePersistentLibraryState(storedState), readLocalPersistentLibraryState());
+        stableStorageHasSeenLibraryData.current = persistentLibraryDataCount(merged) > 0;
+        setHighlights(merged.highlights);
+        setHistory(merged.history);
+        setSnapshots(merged.snapshots);
+        setVideoMetadata(merged.videoMetadata);
+        setInspectorOpen(merged.uiState.inspectorOpen);
+        setInspectorTab(merged.uiState.inspectorTab);
+        setLibraryTab(merged.uiState.libraryTab);
+        setSortMode(merged.uiState.sortMode);
+        setRatingFilterMode(merged.uiState.ratingFilterMode);
+        setLibrarySearchQuery(merged.uiState.librarySearchQuery);
+        setTagFilter(merged.uiState.tagFilter);
+        setMinRatingFilter(merged.uiState.minRatingFilter);
+        setMagnetRecords(merged.magnetRecords);
+      })
+      .catch(() => {
+        // Keep the localStorage copy as a fallback if the stable state file is unavailable.
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setStableStorageReady(true);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!stableStorageReady) {
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => {
+      const payload = {
+        version: 1,
+        updatedAt: Date.now(),
+        highlights,
+        history: history.slice(0, MAX_HISTORY_ITEMS),
+        snapshots: snapshots.slice(0, MAX_PLAYBACK_SNAPSHOTS),
+        videoMetadata,
+        uiState: { inspectorOpen, inspectorTab, libraryTab, sortMode, ratingFilterMode, librarySearchQuery, tagFilter, minRatingFilter },
+        magnetRecords: magnetRecords.slice(0, MAX_MAGNET_RECORDS)
+      };
+      const libraryState = normalizePersistentLibraryState(payload);
+
+      if (persistentLibraryDataCount(libraryState) === 0 && !stableStorageHasSeenLibraryData.current) {
+        return;
+      }
+
+      stableStorageHasSeenLibraryData.current = true;
+      void window.lplay.saveLibraryState(payload);
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    highlights,
+    history,
+    inspectorOpen,
+    inspectorTab,
+    librarySearchQuery,
+    libraryTab,
+    magnetRecords,
+    minRatingFilter,
+    ratingFilterMode,
+    snapshots,
+    sortMode,
+    stableStorageReady,
+    tagFilter,
+    videoMetadata
+  ]);
+
+  useEffect(() => {
     localStorage.setItem(HIGHLIGHT_STORAGE_KEY, JSON.stringify(highlights));
   }, [highlights]);
 
   useEffect(() => {
-    localStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(history.slice(0, MAX_HISTORY_ITEMS)));
+    savePlaybackHistory(history);
   }, [history]);
 
   useEffect(() => {
